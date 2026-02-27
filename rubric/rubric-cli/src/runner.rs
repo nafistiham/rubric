@@ -14,14 +14,12 @@ pub fn collect_ruby_files(path: &Path) -> Vec<std::path::PathBuf> {
         .collect()
 }
 
-/// Run all rules against the given source, returning all diagnostics.
+/// Run all rules against the given context, returning all diagnostics.
 pub fn run_rules_on_source(
-    path: &Path,
-    source: &str,
+    ctx: &LintContext,
     rules: &[Box<dyn Rule>],
 ) -> Vec<rubric_core::Diagnostic> {
-    let ctx = LintContext::new(path, source);
-    rules.iter().flat_map(|rule| rule.check_source(&ctx)).collect()
+    rules.iter().flat_map(|rule| rule.check_source(ctx)).collect()
 }
 
 #[cfg(test)]
@@ -147,8 +145,9 @@ mod tests {
         fs::write(&file, "x = 1\n").unwrap();
 
         let source = fs::read_to_string(&file).unwrap();
+        let ctx = LintContext::new(&file, &source);
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(AlwaysWarn)];
-        let diagnostics = run_rules_on_source(&file, &source, &rules);
+        let diagnostics = run_rules_on_source(&ctx, &rules);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, "Test/AlwaysWarn");
@@ -161,8 +160,9 @@ mod tests {
         fs::write(&file, "x = 1\n").unwrap();
 
         let source = fs::read_to_string(&file).unwrap();
+        let ctx = LintContext::new(&file, &source);
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(NeverWarn)];
-        let diagnostics = run_rules_on_source(&file, &source, &rules);
+        let diagnostics = run_rules_on_source(&ctx, &rules);
 
         assert!(diagnostics.is_empty());
     }
@@ -174,8 +174,9 @@ mod tests {
         fs::write(&file, "x = 1\n").unwrap();
 
         let source = fs::read_to_string(&file).unwrap();
+        let ctx = LintContext::new(&file, &source);
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(AlwaysWarn), Box::new(AlwaysWarn)];
-        let diagnostics = run_rules_on_source(&file, &source, &rules);
+        let diagnostics = run_rules_on_source(&ctx, &rules);
 
         assert_eq!(diagnostics.len(), 2);
     }
@@ -183,8 +184,9 @@ mod tests {
     #[test]
     fn run_rules_returns_empty_for_empty_source() {
         use rubric_rules::TrailingWhitespace;
+        let ctx = LintContext::new(Path::new("test.rb"), "");
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(TrailingWhitespace)];
-        let diagnostics = run_rules_on_source(Path::new("test.rb"), "", &rules);
+        let diagnostics = run_rules_on_source(&ctx, &rules);
         assert!(diagnostics.is_empty());
     }
 }
