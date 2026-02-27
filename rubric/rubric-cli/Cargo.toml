@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 rubric-core  = { path = "../rubric-core" }
 rubric-rules = { path = "../rubric-rules" }
-ruby-prism   = { workspace = true }
 clap         = { workspace = true }
 anyhow       = { workspace = true }
 walkdir      = { workspace = true }

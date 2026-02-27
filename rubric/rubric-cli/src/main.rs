@@ -30,7 +30,12 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Check { path, fix: _ } => {
+        Commands::Check { path, fix } => {
+            if fix {
+                eprintln!("Note: --fix is not yet implemented in this version. Run `rubric check` without --fix to see violations.");
+                return Ok(());
+            }
+
             let rules: Vec<Box<dyn Rule>> = vec![
                 Box::new(TrailingWhitespace),
             ];
@@ -47,7 +52,7 @@ fn main() -> Result<()> {
             for file in &files {
                 let source = std::fs::read_to_string(file)?;
                 let ctx = rubric_core::LintContext::new(file, &source);
-                let diagnostics = runner::run_rules_on_source(file, &source, &rules);
+                let diagnostics = runner::run_rules_on_source(&ctx, &rules);
                 for diag in &diagnostics {
                     let (line, col) = ctx.offset_to_line_col(diag.range.start);
                     println!(

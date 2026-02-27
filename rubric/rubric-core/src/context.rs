@@ -15,9 +15,20 @@ impl<'src> LintContext<'src> {
         let lines: Vec<&str> = source.lines().collect();
         let mut offsets = Vec::with_capacity(lines.len());
         let mut offset: u32 = 0;
+        let mut remaining = source;
         for line in &lines {
             offsets.push(offset);
-            offset += line.len() as u32 + 1; // +1 for '\n'
+            offset += line.len() as u32;
+            // Consume the line from remaining, then count actual newline bytes
+            remaining = &remaining[line.len()..];
+            if remaining.starts_with("\r\n") {
+                offset += 2;
+                remaining = &remaining[2..];
+            } else if remaining.starts_with('\n') {
+                offset += 1;
+                remaining = &remaining[1..];
+            }
+            // No newline at end of file — offset stays as-is
         }
         Self {
             path,
@@ -81,5 +92,16 @@ mod tests {
     fn test_offset_to_line_col_empty_source() {
         let ctx = LintContext::new(Path::new("test.rb"), "");
         assert_eq!(ctx.offset_to_line_col(0), (1, 1));
+    }
+
+    #[test]
+    fn test_crlf_line_endings() {
+        // Simulate a file with Windows-style \r\n endings
+        let source = "ab\r\ncd\r\n";
+        let ctx = LintContext::new(Path::new("test.rb"), source);
+        // "ab" at offset 0, "cd" at offset 4 (2 chars + \r\n = 4 bytes)
+        assert_eq!(ctx.line_start_offsets[0], 0);
+        assert_eq!(ctx.line_start_offsets[1], 4);
+        assert_eq!(ctx.offset_to_line_col(4), (2, 1)); // 'c'
     }
 }
