@@ -3,7 +3,7 @@ use crate::{context::LintContext, types::{Diagnostic, Fix}};
 /// Every Rubric cop implements this trait.
 ///
 /// - Source-level rules (line length, trailing whitespace): implement `check_source`.
-/// - AST-level rules (string literals, method style): implement `check_node` (added in M2).
+/// - AST-level rules (string literals, method style): implement `node_kinds` + `check_node`.
 pub trait Rule: Send + Sync {
     /// Rubocop-style identifier, e.g. "Layout/TrailingWhitespace".
     fn name(&self) -> &'static str;
@@ -11,6 +11,26 @@ pub trait Rule: Send + Sync {
     /// Called once per file with the full source.
     /// Override for line-level or whole-file checks.
     fn check_source(&self, _ctx: &LintContext) -> Vec<Diagnostic> {
+        vec![]
+    }
+
+    /// Which AST node kinds this rule wants to visit.
+    ///
+    /// Return an empty slice (the default) for source-only rules.
+    /// Kind names match ruby-prism `Node` enum variant names, e.g. `"StringNode"`,
+    /// `"DefNode"`, `"CallNode"`.
+    fn node_kinds(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Called for each AST node whose kind is listed in `node_kinds()`.
+    ///
+    /// The default implementation returns no diagnostics.
+    fn check_node(
+        &self,
+        _ctx: &LintContext<'_>,
+        _node: &ruby_prism::Node<'_>,
+    ) -> Vec<Diagnostic> {
         vec![]
     }
 
