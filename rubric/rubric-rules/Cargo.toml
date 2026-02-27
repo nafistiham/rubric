@@ -7,5 +7,3 @@ edition = "2021"
 rubric-core = { path = "../rubric-core" }
 ruby-prism  = { workspace = true }
 
-[dev-dependencies]
-rubric-core = { path = "../rubric-core" }
