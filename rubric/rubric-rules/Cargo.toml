@@ -1,0 +1,11 @@
+[package]
+name    = "rubric-rules"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rubric-core = { path = "../rubric-core" }
+ruby-prism  = { workspace = true }
+
+[dev-dependencies]
+rubric-core = { path = "../rubric-core" }
