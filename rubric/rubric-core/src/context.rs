@@ -28,12 +28,19 @@ impl<'src> LintContext<'src> {
     }
 
     /// Convert a byte offset to (line, column), both 1-based.
+    /// If `offset` exceeds the source length, returns the last line/column.
+    /// Returns (1, 1) for empty source.
     pub fn offset_to_line_col(&self, offset: u32) -> (usize, usize) {
+        if self.line_start_offsets.is_empty() {
+            return (1, 1);
+        }
         let line_idx = self
             .line_start_offsets
             .partition_point(|&start| start <= offset)
             .saturating_sub(1);
-        let col = (offset - self.line_start_offsets[line_idx]) as usize + 1;
+        // Clamp to valid range in case offset exceeds source length
+        let line_idx = line_idx.min(self.line_start_offsets.len() - 1);
+        let col = (offset.saturating_sub(self.line_start_offsets[line_idx])) as usize + 1;
         (line_idx + 1, col)
     }
 }
@@ -68,5 +75,11 @@ mod tests {
         assert_eq!(ctx.offset_to_line_col(0), (1, 1)); // 'a'
         assert_eq!(ctx.offset_to_line_col(1), (1, 2)); // 'b'
         assert_eq!(ctx.offset_to_line_col(3), (2, 1)); // 'c'
+    }
+
+    #[test]
+    fn test_offset_to_line_col_empty_source() {
+        let ctx = LintContext::new(Path::new("test.rb"), "");
+        assert_eq!(ctx.offset_to_line_col(0), (1, 1));
     }
 }
