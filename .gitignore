@@ -1,0 +1,15 @@
+# Rust build artifacts
+target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Claude local settings (machine-specific)
+.claude/settings.local.json
