@@ -47,13 +47,7 @@ fn main() -> Result<()> {
             for file in &files {
                 let source = std::fs::read_to_string(file)?;
                 let ctx = rubric_core::LintContext::new(file, &source);
-                let diagnostics = {
-                    let mut diags = Vec::new();
-                    for rule in &rules {
-                        diags.extend(rule.check_source(&ctx));
-                    }
-                    diags
-                };
+                let diagnostics = runner::run_rules_on_source(file, &source, &rules);
                 for diag in &diagnostics {
                     let (line, col) = ctx.offset_to_line_col(diag.range.start);
                     println!(
