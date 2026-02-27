@@ -1,9 +1,11 @@
 mod runner;
+mod config;
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 use rubric_core::Rule;
 use rubric_rules::TrailingWhitespace;
+use crate::config::Config;
 
 #[derive(Parser)]
 #[command(name = "rubric", version, about = "A fast Ruby linter and formatter")]
@@ -35,6 +37,9 @@ fn main() -> Result<()> {
                 eprintln!("Note: --fix is not yet implemented. Run `rubric check` without --fix.");
                 return Ok(());
             }
+
+            let config = Config::load(&std::env::current_dir()?)?;
+            let _ = config; // will be used when rule registry is built
 
             let rules: Vec<Box<dyn Rule + Send + Sync>> = vec![
                 Box::new(TrailingWhitespace),
