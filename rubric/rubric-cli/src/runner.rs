@@ -1,5 +1,4 @@
 use std::path::Path;
-use anyhow::Result;
 use walkdir::WalkDir;
 use rubric_core::{LintContext, Rule};
 
@@ -15,18 +14,14 @@ pub fn collect_ruby_files(path: &Path) -> Vec<std::path::PathBuf> {
         .collect()
 }
 
-#[allow(dead_code)]
-pub fn run_rules_on_file(
+/// Run all rules against the given source, returning all diagnostics.
+pub fn run_rules_on_source(
     path: &Path,
+    source: &str,
     rules: &[Box<dyn Rule>],
-) -> Result<Vec<rubric_core::Diagnostic>> {
-    let source = std::fs::read_to_string(path)?;
-    let ctx = LintContext::new(path, &source);
-    let mut diagnostics = Vec::new();
-    for rule in rules {
-        diagnostics.extend(rule.check_source(&ctx));
-    }
-    Ok(diagnostics)
+) -> Vec<rubric_core::Diagnostic> {
+    let ctx = LintContext::new(path, source);
+    rules.iter().flat_map(|rule| rule.check_source(&ctx)).collect()
 }
 
 #[cfg(test)]
@@ -143,50 +138,53 @@ mod tests {
         assert!(files[0].ends_with("single.rb"));
     }
 
-    // run_rules_on_file tests
+    // run_rules_on_source tests
 
     #[test]
-    fn run_rules_on_file_returns_diagnostics_from_rules() {
+    fn run_rules_on_source_returns_diagnostics_from_rules() {
         let dir = make_temp_dir();
         let file = dir.path().join("test.rb");
         fs::write(&file, "x = 1\n").unwrap();
 
+        let source = fs::read_to_string(&file).unwrap();
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(AlwaysWarn)];
-        let diagnostics = run_rules_on_file(&file, &rules).unwrap();
+        let diagnostics = run_rules_on_source(&file, &source, &rules);
 
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].rule, "Test/AlwaysWarn");
     }
 
     #[test]
-    fn run_rules_on_file_returns_empty_when_no_violations() {
+    fn run_rules_on_source_returns_empty_when_no_violations() {
         let dir = make_temp_dir();
         let file = dir.path().join("clean.rb");
         fs::write(&file, "x = 1\n").unwrap();
 
+        let source = fs::read_to_string(&file).unwrap();
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(NeverWarn)];
-        let diagnostics = run_rules_on_file(&file, &rules).unwrap();
+        let diagnostics = run_rules_on_source(&file, &source, &rules);
 
         assert!(diagnostics.is_empty());
     }
 
     #[test]
-    fn run_rules_on_file_collects_from_multiple_rules() {
+    fn run_rules_on_source_collects_from_multiple_rules() {
         let dir = make_temp_dir();
         let file = dir.path().join("multi.rb");
         fs::write(&file, "x = 1\n").unwrap();
 
+        let source = fs::read_to_string(&file).unwrap();
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(AlwaysWarn), Box::new(AlwaysWarn)];
-        let diagnostics = run_rules_on_file(&file, &rules).unwrap();
+        let diagnostics = run_rules_on_source(&file, &source, &rules);
 
         assert_eq!(diagnostics.len(), 2);
     }
 
     #[test]
-    fn run_rules_on_file_errors_on_missing_file() {
-        let rules: Vec<Box<dyn Rule>> = vec![Box::new(NeverWarn)];
-        let result = run_rules_on_file(Path::new("/nonexistent/path.rb"), &rules);
-
-        assert!(result.is_err());
+    fn run_rules_returns_empty_for_empty_source() {
+        use rubric_rules::TrailingWhitespace;
+        let rules: Vec<Box<dyn Rule>> = vec![Box::new(TrailingWhitespace)];
+        let diagnostics = run_rules_on_source(Path::new("test.rb"), "", &rules);
+        assert!(diagnostics.is_empty());
     }
 }
