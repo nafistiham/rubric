@@ -1,8 +1,9 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
+use rayon::prelude::*;
 use rubric_core::{LintContext, Rule};
 
-pub fn collect_ruby_files(path: &Path) -> Vec<std::path::PathBuf> {
+pub fn collect_ruby_files(path: &Path) -> Vec<PathBuf> {
     WalkDir::new(path)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -20,6 +21,23 @@ pub fn run_rules_on_source(
     rules: &[Box<dyn Rule>],
 ) -> Vec<rubric_core::Diagnostic> {
     rules.iter().flat_map(|rule| rule.check_source(ctx)).collect()
+}
+
+/// Process multiple files in parallel using Rayon.
+/// Returns (path, diagnostics) pairs, order is non-deterministic.
+pub fn run_all_files(
+    files: &[PathBuf],
+    rules: &[Box<dyn Rule + Send + Sync>],
+) -> Vec<(PathBuf, Vec<rubric_core::Diagnostic>)> {
+    files
+        .par_iter()
+        .filter_map(|path| {
+            let source = std::fs::read_to_string(path).ok()?;
+            let ctx = LintContext::new(path, &source);
+            let diagnostics = rules.iter().flat_map(|rule| rule.check_source(&ctx)).collect();
+            Some((path.clone(), diagnostics))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -188,5 +206,28 @@ mod tests {
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(TrailingWhitespace)];
         let diagnostics = run_rules_on_source(&ctx, &rules);
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn run_all_files_processes_multiple_files_in_parallel() {
+        use rubric_rules::TrailingWhitespace;
+        let dir = tempfile::tempdir().expect("temp dir");
+        // File with trailing whitespace
+        let f1 = dir.path().join("a.rb");
+        std::fs::write(&f1, "def foo   \nend\n").unwrap();
+        // Clean file
+        let f2 = dir.path().join("b.rb");
+        std::fs::write(&f2, "def bar\nend\n").unwrap();
+
+        let rules: Vec<Box<dyn Rule + Send + Sync>> = vec![Box::new(TrailingWhitespace)];
+        let files = vec![f1.clone(), f2.clone()];
+        let mut results = run_all_files(&files, &rules);
+        results.sort_by(|a, b| a.0.cmp(&b.0));
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, f1);
+        assert_eq!(results[0].1.len(), 1); // 1 violation in a.rb
+        assert_eq!(results[1].0, f2);
+        assert_eq!(results[1].1.len(), 0); // 0 violations in b.rb
     }
 }

@@ -9,6 +9,7 @@ rubric-rules = { path = "../rubric-rules" }
 clap         = { workspace = true }
 anyhow       = { workspace = true }
 walkdir      = { workspace = true }
+rayon        = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
