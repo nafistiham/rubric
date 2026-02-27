@@ -1,0 +1,16 @@
+[workspace]
+members = [
+    "rubric-core",
+    "rubric-rules",
+    "rubric-cli",
+]
+resolver = "2"
+
+[workspace.dependencies]
+ruby-prism = "1.9.0"
+rayon      = "1.10"
+anyhow     = "1"
+clap       = { version = "4", features = ["derive"] }
+serde      = { version = "1", features = ["derive"] }
+toml       = "0.8"
+walkdir    = "2"
