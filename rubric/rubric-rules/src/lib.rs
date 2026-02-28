@@ -11,3 +11,4 @@ pub use layout::space_before_comment::SpaceBeforeComment;
 
 pub use style::frozen_string_literal_comment::FrozenStringLiteralComment;
 pub use style::string_literals::StringLiterals;
+pub use style::trailing_comma_in_arguments::TrailingCommaInArguments;
