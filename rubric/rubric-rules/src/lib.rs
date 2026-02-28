@@ -4,3 +4,4 @@ pub use layout::trailing_whitespace::TrailingWhitespace;
 pub use layout::trailing_newlines::TrailingNewlines;
 pub use layout::indentation_width::IndentationWidth;
 pub use layout::line_length::LineLength;
+pub use layout::empty_lines::EmptyLines;
