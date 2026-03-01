@@ -7,7 +7,7 @@ use rubric_core::{Rule, FixSafety};
 use rubric_rules::{
     TrailingWhitespace,
     TrailingNewlines, IndentationWidth, LineLength, EmptyLines,
-    SpaceAfterComma, SpaceBeforeComment,
+    SpaceAfterComma, SpaceBeforeComment, SpaceAroundOperators,
     FrozenStringLiteralComment, StringLiterals, TrailingCommaInArguments,
 };
 use crate::config::Config;
@@ -76,6 +76,7 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(FrozenStringLiteralComment),
         Box::new(StringLiterals),
         Box::new(TrailingCommaInArguments),
+        Box::new(SpaceAroundOperators),
     ]
 }
 
