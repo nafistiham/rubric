@@ -16,3 +16,4 @@ pub mod leading_comment_space;
 pub mod space_around_block_parameters;
 pub mod first_hash_element_indentation;
 pub mod empty_lines_around_class_body;
+pub mod empty_lines_around_module_body;
