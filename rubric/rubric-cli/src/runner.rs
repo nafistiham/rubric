@@ -15,16 +15,6 @@ pub fn collect_ruby_files(path: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Run all rules against the given context, returning all diagnostics.
-/// Runs both source-level checks and AST-level checks (via walker).
-#[allow(dead_code)]
-pub fn run_rules_on_source(
-    ctx: &LintContext,
-    rules: &[Box<dyn Rule>],
-) -> Vec<rubric_core::Diagnostic> {
-    rules.iter().flat_map(|rule| rule.check_source(ctx)).collect()
-}
-
 /// Process multiple files in parallel using Rayon.
 /// Returns (path, source, diagnostics) triples, order is non-deterministic.
 pub fn run_all_files(
@@ -64,6 +54,12 @@ mod tests {
     use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
     use std::fs;
     use tempfile::TempDir;
+
+    /// Run all rules against the given context, returning all diagnostics.
+    /// Runs both source-level checks and AST-level checks (via walker).
+    pub fn run_rules_on_source(ctx: &LintContext, rules: &[Box<dyn Rule>]) -> Vec<rubric_core::Diagnostic> {
+        rules.iter().flat_map(|rule| rule.check_source(ctx)).collect()
+    }
 
     struct AlwaysWarn;
 
