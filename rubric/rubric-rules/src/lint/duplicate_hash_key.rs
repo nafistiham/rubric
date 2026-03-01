@@ -22,7 +22,6 @@ impl Rule for DuplicateHashKey {
             // Also detect `"word" =>` or `:word =>` patterns
             let bytes = line.as_bytes();
             let len = bytes.len();
-            let mut keys: Vec<String> = Vec::new();
             let mut seen: HashSet<String> = HashSet::new();
             let mut j = 0;
 
@@ -49,8 +48,7 @@ impl Rule for DuplicateHashKey {
                                 severity: Severity::Warning,
                             });
                         } else {
-                            seen.insert(key.clone());
-                            keys.push(key);
+                            seen.insert(key);
                         }
                     }
                     continue;

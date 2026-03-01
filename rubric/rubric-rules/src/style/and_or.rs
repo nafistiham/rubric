@@ -28,9 +28,7 @@ impl Rule for AndOr {
                     let line_start = ctx.line_start_offsets[i] as usize;
                     diags.push(Diagnostic {
                         rule: self.name(),
-                        message: format!(
-                            "Use `&&`/`||` instead of `and`/`or` keyword."
-                        ),
+                        message: "Use `&&`/`||` instead of `and`/`or` keyword.".to_string(),
                         range: TextRange::new(
                             (line_start + kw_start) as u32,
                             (line_start + kw_start + kw_len) as u32,

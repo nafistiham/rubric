@@ -37,7 +37,7 @@ impl Rule for RedundantSelf {
                 || trimmed == "do" || trimmed.ends_with(" do") {
                 depth += 1;
             } else if trimmed == "end" || trimmed.starts_with("end ") {
-                if depth > 0 { depth -= 1; }
+                depth = depth.saturating_sub(1);
                 if depth == 0 { in_def = false; }
             }
 
