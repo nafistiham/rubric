@@ -1,4 +1,4 @@
-use rubric_core::{Diagnostic, Fix, FixSafety, LintContext, Rule, Severity, TextEdit, TextRange};
+use rubric_core::{Diagnostic, Fix, LintContext, Rule, Severity, TextRange};
 
 pub struct HashSyntax;
 
@@ -66,15 +66,7 @@ impl Rule for HashSyntax {
         diags
     }
 
-    fn fix(&self, diag: &Diagnostic) -> Option<Fix> {
-        // This is a safe transformation but the replacement content depends on the source
-        // We mark it as safe but the replacement would need source content — skip for now
-        Some(Fix {
-            edits: vec![TextEdit {
-                range: diag.range,
-                replacement: String::new(), // placeholder — real fix would parse `:foo =>` -> `foo:`
-            }],
-            safety: FixSafety::Unsafe,
-        })
+    fn fix(&self, _diag: &Diagnostic) -> Option<Fix> {
+        None // TODO: implement :sym => val -> sym: val transformation
     }
 }
