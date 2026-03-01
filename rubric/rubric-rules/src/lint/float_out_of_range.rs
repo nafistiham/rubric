@@ -32,7 +32,6 @@ impl Rule for FloatOutOfRange {
                     // Check for `e` or `E`
                     if j < len && (bytes[j] == b'e' || bytes[j] == b'E') {
                         j += 1;
-                        let exp_start = j;
                         // Optional sign
                         if j < len && (bytes[j] == b'+' || bytes[j] == b'-') {
                             j += 1;
@@ -45,7 +44,6 @@ impl Rule for FloatOutOfRange {
                         // If exponent has 3+ digits (>= 100), it's likely overflow
                         if exp_digits >= 3 {
                             let line_start = ctx.line_start_offsets[i] as usize;
-                            let _ = exp_start;
                             diags.push(Diagnostic {
                                 rule: self.name(),
                                 message: "Float literal with large exponent will overflow to Infinity.".into(),

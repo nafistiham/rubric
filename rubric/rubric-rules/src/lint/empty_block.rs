@@ -47,17 +47,15 @@ impl Rule for EmptyBlock {
             // Also detect `do\nend` (empty do..end block)
             // Check if line ends with `do` and next non-blank line is `end`
             let trimmed_end = line.trim_end();
-            if trimmed_end.ends_with(" do") || trimmed_end == "do" {
-                if i + 1 < n && lines[i + 1].trim() == "end" {
-                    let line_start = ctx.line_start_offsets[i] as usize;
-                    let do_pos = trimmed_end.len() - 2;
-                    diags.push(Diagnostic {
-                        rule: self.name(),
-                        message: "Empty `do..end` block detected.".into(),
-                        range: TextRange::new((line_start + do_pos) as u32, (line_start + do_pos + 2) as u32),
-                        severity: Severity::Warning,
-                    });
-                }
+            if (trimmed_end.ends_with(" do") || trimmed_end == "do") && i + 1 < n && lines[i + 1].trim() == "end" {
+                let line_start = ctx.line_start_offsets[i] as usize;
+                let do_pos = trimmed_end.len() - 2;
+                diags.push(Diagnostic {
+                    rule: self.name(),
+                    message: "Empty `do..end` block detected.".into(),
+                    range: TextRange::new((line_start + do_pos) as u32, (line_start + do_pos + 2) as u32),
+                    severity: Severity::Warning,
+                });
             }
         }
 

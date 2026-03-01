@@ -15,7 +15,7 @@ impl Rule for SuppressedException {
         // Detect `rescue` line immediately followed by `end` with no code between
         let mut i = 0;
         while i < n {
-            let trimmed = lines[i].trim();
+            let trimmed = lines[i].trim_start();
             if trimmed == "rescue" || trimmed.starts_with("rescue ") || trimmed.starts_with("rescue\t") {
                 // Check next non-blank line is `end`
                 let mut j = i + 1;

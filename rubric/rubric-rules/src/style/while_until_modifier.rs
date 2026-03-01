@@ -32,7 +32,7 @@ impl Rule for WhileUntilModifier {
 
                 if !adds_depth {
                     let line_start = ctx.line_start_offsets[i];
-                    let keyword_len = if is_while { 5 } else { 5 }; // "while" or "until"
+                    let keyword_len = 5u32; // "while" and "until" are both 5 chars
                     diags.push(Diagnostic {
                         rule: self.name(),
                         message: "Use modifier form instead of multi-line `while`/`until`.".into(),

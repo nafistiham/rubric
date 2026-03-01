@@ -44,12 +44,9 @@ impl Rule for AmbiguousBlockAssociation {
 
                     // Read second word
                     if j >= len || (!bytes[j].is_ascii_alphabetic() && bytes[j] != b'_') { continue; }
-                    let w2_start = j;
                     while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
                         j += 1;
                     }
-                    let w2_end = j;
-                    let _ = w2_end;
 
                     // Skip space then check for `{`
                     if j >= len || bytes[j] != b' ' { continue; }
@@ -65,9 +62,6 @@ impl Rule for AmbiguousBlockAssociation {
                     if keywords.contains(&first_word) {
                         continue;
                     }
-
-                    let second_word = &line[w2_start..w2_end - (w2_end - w2_start)];
-                    let _ = second_word;
 
                     let line_start = ctx.line_start_offsets[i] as usize;
                     let brace_pos = (line_start + j) as u32;

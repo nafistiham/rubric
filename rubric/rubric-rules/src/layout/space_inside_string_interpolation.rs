@@ -24,49 +24,45 @@ impl Rule for SpaceInsideStringInterpolation {
                     if b == b'"' {
                         in_string = true;
                     }
-                } else {
-                    if b == b'"' {
-                        in_string = false;
-                    } else if b == b'\\' {
-                        j += 1; // skip escape
-                    } else if b == b'#' && j + 1 < len && bytes[j + 1] == b'{' {
-                        // Start of interpolation: check for space after #{
-                        let interp_start = j;
-                        j += 2; // skip #{
-                        if j < len && bytes[j] == b' ' {
-                            diags.push(Diagnostic {
-                                rule: self.name(),
-                                message: "Space after `#{` in string interpolation.".into(),
-                                range: TextRange::new(
-                                    (line_start + j) as u32,
-                                    (line_start + j + 1) as u32,
-                                ),
-                                severity: Severity::Warning,
-                            });
-                        }
-                        // Scan to find the matching `}` and check space before it
-                        let mut depth = 1i32;
-                        let interp_body_start = j;
-                        while j < len && depth > 0 {
-                            if bytes[j] == b'{' { depth += 1; }
-                            else if bytes[j] == b'}' { depth -= 1; }
-                            if depth > 0 { j += 1; }
-                        }
-                        // j now points at closing `}`
-                        if depth == 0 && j > interp_body_start && bytes[j - 1] == b' ' {
-                            diags.push(Diagnostic {
-                                rule: self.name(),
-                                message: "Space before `}` in string interpolation.".into(),
-                                range: TextRange::new(
-                                    (line_start + j - 1) as u32,
-                                    (line_start + j) as u32,
-                                ),
-                                severity: Severity::Warning,
-                            });
-                        }
-                        let _ = interp_start;
-                        continue;
+                } else if b == b'"' {
+                    in_string = false;
+                } else if b == b'\\' {
+                    j += 1; // skip escape
+                } else if b == b'#' && j + 1 < len && bytes[j + 1] == b'{' {
+                    // Start of interpolation: check for space after #{
+                    j += 2; // skip #{
+                    if j < len && bytes[j] == b' ' {
+                        diags.push(Diagnostic {
+                            rule: self.name(),
+                            message: "Space after `#{` in string interpolation.".into(),
+                            range: TextRange::new(
+                                (line_start + j) as u32,
+                                (line_start + j + 1) as u32,
+                            ),
+                            severity: Severity::Warning,
+                        });
                     }
+                    // Scan to find the matching `}` and check space before it
+                    let mut depth = 1i32;
+                    let interp_body_start = j;
+                    while j < len && depth > 0 {
+                        if bytes[j] == b'{' { depth += 1; }
+                        else if bytes[j] == b'}' { depth -= 1; }
+                        if depth > 0 { j += 1; }
+                    }
+                    // j now points at closing `}`
+                    if depth == 0 && j > interp_body_start && bytes[j - 1] == b' ' {
+                        diags.push(Diagnostic {
+                            rule: self.name(),
+                            message: "Space before `}` in string interpolation.".into(),
+                            range: TextRange::new(
+                                (line_start + j - 1) as u32,
+                                (line_start + j) as u32,
+                            ),
+                            severity: Severity::Warning,
+                        });
+                    }
+                    continue;
                 }
                 j += 1;
             }

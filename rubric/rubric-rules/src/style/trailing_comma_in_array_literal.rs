@@ -20,7 +20,7 @@ impl Rule for TrailingCommaInArrayLiteral {
                 // Check if the next line is `]`
                 if i + 1 < n {
                     let next = lines[i + 1].trim();
-                    if next == "]" || next.starts_with("]") {
+                    if next == "]" || next.starts_with("] ") || next.starts_with("],") {
                         // Trailing comma before closing bracket
                         let line_start = ctx.line_start_offsets[i] as usize;
                         let comma_pos = trimmed.len() - 1;
