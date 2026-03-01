@@ -13,3 +13,4 @@ pub mod multiline_method_call_indentation;
 pub mod hash_alignment;
 pub mod closing_parenthesis_indentation;
 pub mod leading_comment_space;
+pub mod space_around_block_parameters;
