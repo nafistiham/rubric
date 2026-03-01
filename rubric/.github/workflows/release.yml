@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - platform: x86_64-linux
+            os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+          - platform: aarch64-linux
+            os: ubuntu-latest
+            rust_target: aarch64-unknown-linux-gnu
+            cross: true
+          - platform: x86_64-darwin
+            os: macos-13
+            rust_target: x86_64-apple-darwin
+          - platform: arm64-darwin
+            os: macos-latest
+            rust_target: aarch64-apple-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install cross (Linux cross-compile)
+        if: matrix.cross
+        run: cargo install cross
+
+      - name: Build binary
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.rust_target }}
+          else
+            cargo build --release --target ${{ matrix.rust_target }}
+          fi
+        working-directory: rubric
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp rubric/target/${{ matrix.rust_target }}/release/rubric dist/rubric-${{ matrix.platform }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rubric-${{ matrix.platform }}
+          path: dist/
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+
+  publish-gem:
+    name: Publish to RubyGems
+    needs: release
+    runs-on: ubuntu-latest
+    environment: rubygems
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Configure RubyGems credentials
+        run: |
+          mkdir -p ~/.gem
+          echo ":rubygems_api_key: ${{ secrets.RUBYGEMS_API_KEY }}" > ~/.gem/credentials
+          chmod 0600 ~/.gem/credentials
+
+      - name: Build and push gem
+        working-directory: rubric/gem
+        run: |
+          gem build rubric.gemspec
+          gem push rubric-*.gem
