@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-pub const KNOWN_COPS: &[&str] = &[
+pub(crate) const KNOWN_COPS: &[&str] = &[
     "Layout/TrailingWhitespace",
     "Layout/TrailingNewlines",
     "Layout/IndentationWidth",
@@ -43,34 +43,38 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
     let yaml: serde_yaml::Value = serde_yaml::from_str(&content)
         .with_context(|| "Failed to parse .rubocop.yml")?;
 
+    let mapping = yaml.as_mapping()
+        .ok_or_else(|| anyhow::anyhow!(
+            "{} is not a valid .rubocop.yml: expected a YAML mapping at the top level",
+            rubocop_path.display()
+        ))?;
+
     let mut known_lines = Vec::<String>::new();
     let mut unknown_lines = Vec::<String>::new();
 
-    if let Some(mapping) = yaml.as_mapping() {
-        for (key, value) in mapping {
-            let cop_name = match key.as_str() {
-                Some(s) => s,
-                None => continue,
-            };
+    for (key, value) in mapping {
+        let cop_name = match key.as_str() {
+            Some(s) => s,
+            None => continue,
+        };
 
-            // Skip top-level Rubocop config keys (not cops)
-            if matches!(cop_name, "AllCops" | "inherit_from" | "require" | "inherit_gem") {
-                continue;
-            }
+        // Skip top-level Rubocop config keys (not cops)
+        if matches!(cop_name, "AllCops" | "inherit_from" | "require" | "inherit_gem") {
+            continue;
+        }
 
-            if KNOWN_COPS.contains(&cop_name) {
-                let enabled = value
-                    .get("Enabled")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
-                known_lines.push(format!(
-                    "[rules.\"{cop_name}\"]\nenabled = {enabled}"
-                ));
-            } else {
-                unknown_lines.push(format!(
-                    "# UNKNOWN: {cop_name} (not yet implemented in Rubric)"
-                ));
-            }
+        if KNOWN_COPS.contains(&cop_name) {
+            let enabled = value
+                .get("Enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true); // RuboCop defaults to enabled when key is absent
+            known_lines.push(format!(
+                "[rules.\"{cop_name}\"]\nenabled = {enabled}"
+            ));
+        } else {
+            unknown_lines.push(format!(
+                "# UNKNOWN: {cop_name} (not yet implemented in Rubric)"
+            ));
         }
     }
 
@@ -96,7 +100,8 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
         }
     }
 
-    std::fs::write(output_path, &output)?;
+    std::fs::write(output_path, &output)
+        .with_context(|| format!("Could not write to {}", output_path.display()))?;
     println!("Written to {}", output_path.display());
     println!("  {} cops migrated", known_lines.len());
     println!(
@@ -139,10 +144,13 @@ Style/StringLiterals:
         run(&rubocop_yml, &rubric_toml).unwrap();
 
         let output = fs::read_to_string(&rubric_toml).unwrap();
-        assert!(output.contains("[rules.\"Layout/TrailingWhitespace\"]"));
-        assert!(output.contains("enabled = true"));
-        assert!(output.contains("[rules.\"Layout/LineLength\"]"));
-        assert!(output.contains("enabled = false"));
+        // More specific: assert the full cop block is present
+        assert!(output.contains("[rules.\"Layout/TrailingWhitespace\"]\nenabled = true"),
+            "expected TrailingWhitespace block with enabled = true, got:\n{output}");
+        assert!(output.contains("[rules.\"Layout/LineLength\"]\nenabled = false"),
+            "expected LineLength block with enabled = false, got:\n{output}");
+        assert!(output.contains("[rules.\"Style/StringLiterals\"]\nenabled = true"),
+            "expected StringLiterals block with enabled = true, got:\n{output}");
     }
 
     #[test]
