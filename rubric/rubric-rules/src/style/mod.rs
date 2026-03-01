@@ -10,3 +10,4 @@ pub mod redundant_return;
 pub mod guard_clause;
 pub mod safe_navigation;
 pub mod block_delimiters;
+pub mod lambda;
