@@ -24,3 +24,4 @@ pub mod not_keyword;
 pub mod redundant_begin;
 pub mod redundant_self;
 pub mod ternary_parentheses;
+pub mod zero_length_predicate;
