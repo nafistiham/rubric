@@ -12,20 +12,32 @@ impl Rule for SpaceAfterComma {
         for (i, line) in ctx.lines.iter().enumerate() {
             let line_start = ctx.line_start_offsets[i] as usize;
             let line_bytes = line.as_bytes();
-            for (j, &b) in line_bytes.iter().enumerate() {
-                if b == b',' {
-                    let next = line_bytes.get(j + 1).copied();
-                    // flag if next char is not space and not end of line
-                    if next != Some(b' ') && next != Some(b'\t') && next.is_some() {
-                        let pos = (line_start + j) as u32;
-                        diags.push(Diagnostic {
-                            rule: self.name(),
-                            message: "Space missing after comma.".into(),
-                            range: TextRange::new(pos, pos + 1),
-                            severity: Severity::Warning,
-                        });
+            let mut in_string: Option<u8> = None; // None = outside, Some(b'"') or Some(b'\'') = inside
+            let mut j = 0;
+            while j < line_bytes.len() {
+                let b = line_bytes[j];
+                match in_string {
+                    // Inside a string: handle escape sequences and closing delimiter
+                    Some(_) if b == b'\\' => { j += 2; continue; } // skip escaped char
+                    Some(delim) if b == delim => { in_string = None; }
+                    Some(_) => {}
+                    // Outside a string
+                    None if b == b'"' || b == b'\'' => { in_string = Some(b); }
+                    None if b == b',' => {
+                        let next = line_bytes.get(j + 1).copied();
+                        if next != Some(b' ') && next != Some(b'\t') && next.is_some() {
+                            let pos = (line_start + j) as u32;
+                            diags.push(Diagnostic {
+                                rule: self.name(),
+                                message: "Space missing after comma.".into(),
+                                range: TextRange::new(pos, pos + 1),
+                                severity: Severity::Warning,
+                            });
+                        }
                     }
+                    None => {}
                 }
+                j += 1;
             }
         }
         diags
