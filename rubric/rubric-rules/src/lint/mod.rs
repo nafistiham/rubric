@@ -7,3 +7,4 @@ pub mod duplicate_hash_key;
 pub mod empty_block;
 pub mod empty_expression;
 pub mod float_out_of_range;
+pub mod suppressed_exception;
