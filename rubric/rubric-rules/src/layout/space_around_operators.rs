@@ -16,8 +16,6 @@ impl Rule for SpaceAroundOperators {
             let len = bytes.len();
             let mut j = 0;
             let mut in_string: Option<u8> = None;
-            let mut in_comment = false;
-
             while j < len {
                 let b = bytes[j];
 
@@ -27,11 +25,9 @@ impl Rule for SpaceAroundOperators {
                     Some(delim) if b == delim => { in_string = None; j += 1; continue; }
                     Some(_) => { j += 1; continue; }
                     None if b == b'"' || b == b'\'' => { in_string = Some(b); j += 1; continue; }
-                    None if b == b'#' => { in_comment = true; break; }
+                    None if b == b'#' => break, // inline comment — stop scanning
                     None => {}
                 }
-
-                if in_comment { break; }
 
                 // Check for multi-char operators first
                 if j + 1 < len {
