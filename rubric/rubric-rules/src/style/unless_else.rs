@@ -10,7 +10,6 @@ impl Rule for UnlessElse {
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let lines = &ctx.lines;
-        let n = lines.len();
 
         let mut in_unless = false;
         let mut depth = 0i32;
