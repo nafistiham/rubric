@@ -27,3 +27,4 @@ pub mod rescue_ensure_alignment;
 pub mod end_alignment;
 pub mod case_indentation;
 pub mod indentation_consistency;
+pub mod space_inside_string_interpolation;
