@@ -36,6 +36,11 @@ impl Rule for StringLiterals {
         }
         let content = &node_src[1..node_src.len() - 1];
 
+        // Guard against string segments inside interpolation (child nodes of InterpolatedStringNode)
+        if content.windows(2).any(|w| w == b"#{") {
+            return vec![];
+        }
+
         // Contains single quote -> can't convert
         if content.contains(&b'\'') {
             return vec![];
