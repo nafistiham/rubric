@@ -24,11 +24,11 @@ impl Rule for NegatedWhile {
                 None
             };
 
-            if let Some((pattern, _replacement)) = offending {
+            if let Some((_pattern, _replacement)) = offending {
                 let indent = line.len() - trimmed.len();
                 let line_start = ctx.line_start_offsets[i] as usize;
                 let pos = (line_start + indent) as u32;
-                let kw_end = pos + pattern.len() as u32 - 1; // just the keyword
+                let kw_end = pos + 5; // length of "while" or "until"
                 diags.push(Diagnostic {
                     rule: self.name(),
                     message: if trimmed.starts_with("while !") {

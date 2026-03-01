@@ -14,6 +14,8 @@ impl Rule for BlockAlignment {
 
         // Track `do` block openings with their indentation
         let mut block_stack: Vec<usize> = Vec::new(); // indent levels of `do` lines
+        // Track inner construct depth so `end` for if/def/class/etc. doesn't pop block stack
+        let mut inner_depth = 0usize;
 
         for i in 0..n {
             let line = &lines[i];
@@ -24,17 +26,38 @@ impl Rule for BlockAlignment {
                 continue;
             }
 
-            let opens_block = trimmed.ends_with(" do")
-                || trimmed.ends_with(" do |")
-                || trimmed.contains(" do |")
-                || (trimmed == "do");
+            let t = trimmed.trim();
+
+            let opens_block = t.ends_with(" do")
+                || t.ends_with(" do |")
+                || t.contains(" do |")
+                || t.contains(" do|")
+                || t == "do";
+
+            let opens_inner = !opens_block && (
+                t.starts_with("def ")
+                    || t == "def"
+                    || t.starts_with("if ")
+                    || t.starts_with("unless ")
+                    || t.starts_with("while ")
+                    || t.starts_with("until ")
+                    || t == "begin"
+                    || t.starts_with("begin ")
+                    || t.starts_with("case ")
+                    || t.starts_with("class ")
+                    || t.starts_with("module ")
+            );
 
             if opens_block {
                 block_stack.push(indent);
+            } else if opens_inner && !block_stack.is_empty() {
+                inner_depth += 1;
             }
 
-            if trimmed == "end" {
-                if let Some(expected_indent) = block_stack.pop() {
+            if t == "end" {
+                if inner_depth > 0 {
+                    inner_depth -= 1;
+                } else if let Some(expected_indent) = block_stack.pop() {
                     if indent != expected_indent {
                         let line_start = ctx.line_start_offsets[i] as usize;
                         let pos = (line_start + indent) as u32;

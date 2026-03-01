@@ -32,8 +32,16 @@ impl Rule for ParallelAssignment {
                     continue;
                 }
 
-                // Skip swap pattern `a, b = b, a` - both sides have exactly the same vars
-                // Just flag all parallel assignments with literal RHS values
+                // Skip swap pattern `a, b = b, a` — RHS tokens are reverse of LHS tokens
+                let lhs_tokens: Vec<&str> = lhs.split(',').map(|s| s.trim()).collect();
+                let rhs_tokens: Vec<&str> = rhs.split(',').map(|s| s.trim()).collect();
+                if lhs_tokens.len() == rhs_tokens.len() {
+                    let reversed: Vec<&str> = lhs_tokens.iter().copied().rev().collect();
+                    if reversed == rhs_tokens {
+                        continue;
+                    }
+                }
+
                 let indent = line.len() - trimmed.len();
                 let line_start = ctx.line_start_offsets[i] as usize;
                 let pos = (line_start + indent) as u32;

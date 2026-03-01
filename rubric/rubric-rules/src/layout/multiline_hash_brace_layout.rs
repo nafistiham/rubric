@@ -25,7 +25,7 @@ impl Rule for MultilineHashBraceLayout {
                     while j > 0 {
                         j -= 1;
                         let prev = lines[j].trim();
-                        if prev.ends_with('{') || prev.contains(" = {") || prev.ends_with("= {") {
+                        if prev.trim_end().ends_with('{') {
                             is_multiline = true;
                             break;
                         }

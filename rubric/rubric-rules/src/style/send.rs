@@ -15,19 +15,13 @@ impl Rule for Send {
         while let Some(pos) = src[search_start..].find(".send(") {
             let abs_pos = search_start + pos;
 
-            // Exclude `__send__(` and `public_send(`
-            let before_ok = abs_pos == 0 || {
-                // Make sure this isn't `__send__` — check 8 chars before `.`
-                let check_start = if abs_pos >= 8 { abs_pos - 8 } else { 0 };
-                !src[check_start..abs_pos].ends_with("__")
-            };
+            // Exclude `__send__` — check 8 chars before `.`
+            let check_start = abs_pos.saturating_sub(8);
+            let before_ok = !src[check_start..abs_pos].ends_with("__");
 
-            // Ensure `.send(` is not part of `public_send(`
-            let is_public_send = abs_pos >= 7 && src[abs_pos - 6..abs_pos].ends_with("public");
-
-            if before_ok && !is_public_send {
+            if before_ok {
                 let method_start = abs_pos + 1; // skip the `.`
-                let method_end = abs_pos + ".send(".len() as usize;
+                let method_end = abs_pos + ".send(".len();
                 diags.push(Diagnostic {
                     rule: self.name(),
                     message: "Use `public_send` instead of `send` to avoid calling private methods.".into(),

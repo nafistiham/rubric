@@ -12,8 +12,11 @@ impl Rule for ElseAlignment {
         let lines = &ctx.lines;
         let n = lines.len();
 
-        // Stack of (keyword, indent) for if/unless/while/until
+        // Stack of indent for if/unless
         let mut if_stack: Vec<usize> = Vec::new();
+        // Track depth of non-if constructs that consume `end` tokens
+        // so they don't pop the if stack prematurely
+        let mut other_depth = 0usize;
 
         for i in 0..n {
             let line = &lines[i];
@@ -24,26 +27,48 @@ impl Rule for ElseAlignment {
                 continue;
             }
 
-            if trimmed.starts_with("if ") || trimmed.starts_with("unless ") {
+            let t = trimmed.trim();
+
+            if t.starts_with("if ") || t.starts_with("unless ") {
                 if_stack.push(indent);
-            } else if trimmed == "else" || trimmed.starts_with("elsif ") {
-                if let Some(&expected_indent) = if_stack.last() {
-                    if indent != expected_indent {
-                        let line_start = ctx.line_start_offsets[i] as usize;
-                        let pos = (line_start + indent) as u32;
-                        diags.push(Diagnostic {
-                            rule: self.name(),
-                            message: format!(
-                                "`else`/`elsif` at indent {} should be at {}.",
-                                indent, expected_indent
-                            ),
-                            range: TextRange::new(pos, pos + trimmed.len() as u32),
-                            severity: Severity::Warning,
-                        });
+            } else if t.starts_with("def ")
+                || t == "def"
+                || t == "begin"
+                || t.starts_with("begin ")
+                || t.starts_with("while ")
+                || t.starts_with("until ")
+                || t.starts_with("case ")
+                || t.starts_with("class ")
+                || t.starts_with("module ")
+                || t.ends_with(" do")
+                || t.contains(" do |")
+                || t.contains(" do|")
+            {
+                other_depth += 1;
+            } else if t == "else" || t.starts_with("elsif ") {
+                if other_depth == 0 {
+                    if let Some(&expected_indent) = if_stack.last() {
+                        if indent != expected_indent {
+                            let line_start = ctx.line_start_offsets[i] as usize;
+                            let pos = (line_start + indent) as u32;
+                            diags.push(Diagnostic {
+                                rule: self.name(),
+                                message: format!(
+                                    "`else`/`elsif` at indent {} should be at {}.",
+                                    indent, expected_indent
+                                ),
+                                range: TextRange::new(pos, pos + trimmed.len() as u32),
+                                severity: Severity::Warning,
+                            });
+                        }
                     }
                 }
-            } else if trimmed == "end" {
-                if_stack.pop();
+            } else if t == "end" {
+                if other_depth > 0 {
+                    other_depth -= 1;
+                } else {
+                    if_stack.pop();
+                }
             }
         }
 

@@ -17,7 +17,7 @@ impl Rule for UselessElseWithoutRescue {
             let t = lines[i].trim();
             if t == "begin" {
                 // Scan the begin block for rescue and else
-                let begin_line = i;
+                let _begin_line = i;
                 let mut has_rescue = false;
                 let mut else_line: Option<usize> = None;
                 let mut depth = 1usize;

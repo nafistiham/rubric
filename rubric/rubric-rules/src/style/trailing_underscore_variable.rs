@@ -18,10 +18,7 @@ impl Rule for TrailingUnderscoreVariable {
 
             // Detect parallel assignment with trailing `_`: `a, _ =` or `x, y, _ =`
             // The pattern is: comma-separated identifiers ending with `, _` followed by ` =`
-            if let Some(eq_pos) = trimmed.find(" = ").or_else(|| {
-                // Also handle `= ` at end of trimmed (without RHS on same line)
-                None
-            }) {
+            if let Some(eq_pos) = trimmed.find(" = ") {
                 let lhs = &trimmed[..eq_pos];
                 if lhs.contains(',') {
                     // Check if lhs ends with `, _` (possibly with spaces)

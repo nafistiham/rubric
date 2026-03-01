@@ -13,11 +13,19 @@ impl Rule for DuplicateMethods {
         let lines = &ctx.lines;
         let n = lines.len();
 
-        // Map: method_name -> first line index
+        // Map: method_name -> first line index, scoped per class/module
         let mut seen: HashMap<String, usize> = HashMap::new();
 
         for i in 0..n {
             let trimmed = lines[i].trim_start();
+
+            // Reset seen map when entering a new class or module scope
+            let t = trimmed.trim();
+            if t.starts_with("class ") || t.starts_with("module ") {
+                seen.clear();
+                continue;
+            }
+
             if !trimmed.starts_with("def ") {
                 continue;
             }
