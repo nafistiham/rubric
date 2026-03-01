@@ -12,7 +12,7 @@ use rubric_rules::{
     MultilineMethodCallIndentation, HashAlignment, ClosingParenthesisIndentation,
     LeadingCommentSpace, SpaceAroundBlockParameters, FirstHashElementIndentation,
     FrozenStringLiteralComment, StringLiterals, TrailingCommaInArguments, HashSyntax, SymbolArray,
-    WordArray, NegatedIf,
+    WordArray, NegatedIf, UnlessElse,
 };
 use crate::config::Config;
 
@@ -94,6 +94,7 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(SymbolArray),
         Box::new(WordArray),
         Box::new(NegatedIf),
+        Box::new(UnlessElse),
     ]
 }
 
