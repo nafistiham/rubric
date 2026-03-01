@@ -15,3 +15,4 @@ pub mod proc_new;
 pub mod trailing_comma_in_array_literal;
 pub mod symbol_proc;
 pub mod optional_arguments;
+pub mod mutable_constant;
