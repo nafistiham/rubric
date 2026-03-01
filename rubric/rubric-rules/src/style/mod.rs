@@ -7,3 +7,4 @@ pub mod word_array;
 pub mod negated_if;
 pub mod unless_else;
 pub mod redundant_return;
+pub mod guard_clause;
