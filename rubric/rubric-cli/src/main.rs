@@ -39,6 +39,31 @@ enum Commands {
     },
 }
 
+/// Apply all FixSafety::Safe fixes from `results` to disk.
+/// Returns the number of files that had at least one fix applied.
+fn apply_safe_fixes(
+    results: &[(std::path::PathBuf, String, Vec<rubric_core::Diagnostic>)],
+    rules: &[Box<dyn Rule + Send + Sync>],
+) -> anyhow::Result<usize> {
+    let mut total_fixed = 0;
+    for (file, source, diagnostics) in results {
+        let fixes: Vec<_> = diagnostics
+            .iter()
+            .filter_map(|d| {
+                let fix = rules.iter().find(|r| r.name() == d.rule)?.fix(d)?;
+                if fix.safety == FixSafety::Safe { Some(fix) } else { None }
+            })
+            .collect();
+        if !fixes.is_empty() {
+            let corrected = rubric_core::apply_fixes(source, &fixes);
+            std::fs::write(file, corrected)?;
+            println!("{}: fixed {} violation(s)", file.display(), fixes.len());
+            total_fixed += 1;
+        }
+    }
+    Ok(total_fixed)
+}
+
 fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
     vec![
         Box::new(TrailingWhitespace),
@@ -75,26 +100,7 @@ fn main() -> Result<()> {
             results.sort_by(|a, b| a.0.cmp(&b.0));
 
             if fix {
-                let mut total_fixed = 0;
-                for (file, source, diagnostics) in &results {
-                    let fixes: Vec<_> = diagnostics.iter()
-                        .filter_map(|d| {
-                            let fix = rules.iter().find(|r| r.name() == d.rule)?.fix(d)?;
-                            // Only apply safe fixes — unsafe fixes require --fix-unsafe (not yet implemented)
-                            if fix.safety == FixSafety::Safe {
-                                Some(fix)
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    if !fixes.is_empty() {
-                        let corrected = rubric_core::apply_fixes(source, &fixes);
-                        std::fs::write(file, corrected)?;
-                        println!("{}: fixed {} violation(s)", file.display(), fixes.len());
-                        total_fixed += fixes.len();
-                    }
-                }
+                let total_fixed = apply_safe_fixes(&results, &rules)?;
                 if total_fixed == 0 {
                     println!("No violations to fix.");
                 }
@@ -141,26 +147,7 @@ fn main() -> Result<()> {
             let mut results = runner::run_all_files(&files, &rules);
             results.sort_by(|a, b| a.0.cmp(&b.0));
 
-            let mut total_fixed = 0;
-            for (file, source, diagnostics) in &results {
-                // fmt only applies Safe fixes
-                let fixes: Vec<_> = diagnostics.iter()
-                    .filter_map(|d| {
-                        let fix = rules.iter().find(|r| r.name() == d.rule)?.fix(d)?;
-                        if fix.safety == FixSafety::Safe {
-                            Some(fix)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                if !fixes.is_empty() {
-                    let corrected = rubric_core::apply_fixes(source, &fixes);
-                    std::fs::write(file, corrected)?;
-                    println!("{}: fixed {} violation(s)", file.display(), fixes.len());
-                    total_fixed += fixes.len();
-                }
-            }
+            let total_fixed = apply_safe_fixes(&results, &rules)?;
             if total_fixed == 0 {
                 println!("No violations to fix.");
             }
