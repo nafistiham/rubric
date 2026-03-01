@@ -21,3 +21,4 @@ pub mod empty_lines_around_method_body;
 pub mod empty_line_between_defs;
 pub mod extra_spacing;
 pub mod space_after_method_name;
+pub mod space_after_colon;
