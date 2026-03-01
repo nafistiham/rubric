@@ -24,7 +24,7 @@ impl Rule for UnusedBlockArgument {
 
             if let Some(do_offset) = do_pos {
                 let pipe_start = if do_offset == 0 {
-                    trimmed.find('|').map(|p| p)
+                    trimmed.find('|')
                 } else {
                     trimmed.find(" do |").map(|p| p + " do ".len())
                 };

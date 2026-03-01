@@ -38,8 +38,27 @@ impl Rule for SpaceInsideBlockBraces {
                 if b == b'{' {
                     // Check what's after `{`
                     let next = if pos + 1 < n { bytes[pos + 1] } else { 0 };
-                    // Check what's before `}` - find matching close
-                    if next != b' ' && next != b'\n' && next != b'}' {
+                    // Determine if `{` is a block or a hash literal.
+                    // A hash literal follows `=`, `,`, `(`, `[`, `{`, or appears at
+                    // the start of a trimmed line. Skip those.
+                    let prev_nonspace = {
+                        let mut p = pos;
+                        let mut found = 0u8;
+                        while p > 0 {
+                            p -= 1;
+                            if bytes[p] != b' ' && bytes[p] != b'\t' {
+                                found = bytes[p];
+                                break;
+                            }
+                        }
+                        found
+                    };
+                    let is_hash_context = matches!(
+                        prev_nonspace,
+                        b'=' | b',' | b'(' | b'[' | b'{' | 0
+                    ) || pos == line.len() - line.trim_start().len();
+
+                    if !is_hash_context && next != b' ' && next != b'\n' && next != b'}' {
                         // Missing space after `{`
                         let flag_pos = (line_start + pos) as u32;
                         diags.push(Diagnostic {

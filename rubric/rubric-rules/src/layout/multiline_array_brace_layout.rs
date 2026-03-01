@@ -31,7 +31,7 @@ impl Rule for MultilineArrayBraceLayout {
                     while j > 0 {
                         j -= 1;
                         let prev = lines[j].trim();
-                        if prev.contains('[') {
+                        if prev.trim_end().ends_with('[') {
                             is_multiline = true;
                             break;
                         }

@@ -39,16 +39,16 @@ impl Rule for SpaceInsideReferenceBrackets {
                     let prev = if pos > 0 { bytes[pos - 1] } else { 0 };
                     let next = if pos + 1 < n { bytes[pos + 1] } else { 0 };
                     // After a word char (indexing, not array literal)
-                    if prev.is_ascii_alphanumeric() || prev == b'_' || prev == b')' || prev == b']' {
-                        if next == b' ' {
-                            let flag_pos = (line_start + pos + 1) as u32;
-                            diags.push(Diagnostic {
-                                rule: self.name(),
-                                message: "Space detected inside reference brackets.".into(),
-                                range: TextRange::new(flag_pos, flag_pos + 1),
-                                severity: Severity::Warning,
-                            });
-                        }
+                    if (prev.is_ascii_alphanumeric() || prev == b'_' || prev == b')' || prev == b']')
+                        && next == b' '
+                    {
+                        let flag_pos = (line_start + pos + 1) as u32;
+                        diags.push(Diagnostic {
+                            rule: self.name(),
+                            message: "Space detected inside reference brackets.".into(),
+                            range: TextRange::new(flag_pos, flag_pos + 1),
+                            severity: Severity::Warning,
+                        });
                     }
                 }
 

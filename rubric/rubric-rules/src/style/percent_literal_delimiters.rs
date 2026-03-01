@@ -29,6 +29,12 @@ impl Rule for PercentLiteralDelimiters {
                         if depth > 0 { close_pos += 1; }
                     }
 
+                    // If no matching `)` was found, skip this occurrence
+                    if depth > 0 {
+                        i += 1;
+                        continue;
+                    }
+
                     diags.push(Diagnostic {
                         rule: self.name(),
                         message: format!(

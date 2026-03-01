@@ -24,7 +24,7 @@ impl Rule for UnderscorePrefixedVariableName {
             if let Some(eq_pos) = t.find(" = ") {
                 let lhs = t[..eq_pos].trim();
                 if lhs.starts_with('_') && lhs.len() > 1
-                    && lhs.chars().skip(1).next().map(|c| c.is_ascii_lowercase()).unwrap_or(false) {
+                    && lhs.chars().nth(1).map(|c| c.is_ascii_lowercase()).unwrap_or(false) {
                     underscore_vars.push((lhs.to_string(), i));
                 }
             }

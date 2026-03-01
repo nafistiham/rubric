@@ -1,4 +1,5 @@
 use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
+use std::collections::HashSet;
 
 pub struct MultipleComparison;
 
@@ -9,6 +10,7 @@ impl Rule for MultipleComparison {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        let mut seen_lines: HashSet<usize> = HashSet::new();
 
         for (i, line) in ctx.lines.iter().enumerate() {
             let trimmed = line.trim_start();
@@ -19,7 +21,7 @@ impl Rule for MultipleComparison {
             // Detect chained comparisons like `1 < x < 10` or `a <= b <= c`
             // Pattern: something <op> something <op> something
             let ops = ["<=", ">=", "<", ">"];
-            for &op1 in &ops {
+            'outer: for &op1 in &ops {
                 if let Some(pos1) = line.find(op1) {
                     let rest = &line[pos1 + op1.len()..];
                     // Skip whitespace
@@ -32,16 +34,18 @@ impl Rule for MultipleComparison {
                                 // Make sure there's an identifier/value between them
                                 let between = &rest_trimmed[..pos2].trim();
                                 if !between.is_empty() && !between.contains('&') && !between.contains('|') {
-                                    let indent = line.len() - trimmed.len();
-                                    let line_start = ctx.line_start_offsets[i] as usize;
-                                    let pos = (line_start + indent) as u32;
-                                    diags.push(Diagnostic {
-                                        rule: self.name(),
-                                        message: "Chained comparison does not work as expected in Ruby.".into(),
-                                        range: TextRange::new(pos, pos + trimmed.len() as u32),
-                                        severity: Severity::Warning,
-                                    });
-                                    break;
+                                    if seen_lines.insert(i) {
+                                        let indent = line.len() - trimmed.len();
+                                        let line_start = ctx.line_start_offsets[i] as usize;
+                                        let pos = (line_start + indent) as u32;
+                                        diags.push(Diagnostic {
+                                            rule: self.name(),
+                                            message: "Chained comparison does not work as expected in Ruby.".into(),
+                                            range: TextRange::new(pos, pos + trimmed.len() as u32),
+                                            severity: Severity::Warning,
+                                        });
+                                    }
+                                    break 'outer;
                                 }
                             }
                         }
