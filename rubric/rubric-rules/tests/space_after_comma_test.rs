@@ -19,3 +19,11 @@ fn no_violation_with_spaces_after_comma() {
     let diags = SpaceAfterComma.check_source(&ctx);
     assert!(diags.is_empty());
 }
+
+#[test]
+fn no_false_positive_on_comma_in_string() {
+    let source = "foo(\"a,b\", \"c,d\")\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = SpaceAfterComma.check_source(&ctx);
+    assert!(diags.is_empty(), "should not flag commas inside strings, got: {:?}", diags);
+}
