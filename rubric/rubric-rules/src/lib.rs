@@ -17,6 +17,7 @@ pub use layout::hash_alignment::HashAlignment;
 pub use layout::closing_parenthesis_indentation::ClosingParenthesisIndentation;
 pub use layout::leading_comment_space::LeadingCommentSpace;
 pub use layout::space_around_block_parameters::SpaceAroundBlockParameters;
+pub use layout::first_hash_element_indentation::FirstHashElementIndentation;
 
 pub use style::frozen_string_literal_comment::FrozenStringLiteralComment;
 pub use style::string_literals::StringLiterals;

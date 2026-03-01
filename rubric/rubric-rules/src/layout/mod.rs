@@ -14,3 +14,4 @@ pub mod hash_alignment;
 pub mod closing_parenthesis_indentation;
 pub mod leading_comment_space;
 pub mod space_around_block_parameters;
+pub mod first_hash_element_indentation;
