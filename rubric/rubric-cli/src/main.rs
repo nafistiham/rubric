@@ -43,6 +43,10 @@ fn main() -> Result<()> {
 
             let rules: Vec<Box<dyn Rule + Send + Sync>> = vec![
                 Box::new(TrailingWhitespace),
+                // M2 cops (TrailingNewlines, IndentationWidth, LineLength, EmptyLines,
+                // SpaceAfterComma, SpaceBeforeComment, FrozenStringLiteralComment,
+                // StringLiterals, TrailingCommaInArguments) will be wired in M3
+                // when a rule registry and config-driven enabling/disabling is added.
             ];
 
             let files = runner::collect_ruby_files(&path);
