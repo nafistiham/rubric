@@ -16,6 +16,8 @@ pub fn collect_ruby_files(path: &Path) -> Vec<PathBuf> {
 }
 
 /// Run all rules against the given context, returning all diagnostics.
+// Used by tests; not called from production code (run_all_files inlines this logic).
+#[allow(dead_code)]
 pub fn run_rules_on_source(
     ctx: &LintContext,
     rules: &[Box<dyn Rule>],
@@ -32,7 +34,13 @@ pub fn run_all_files(
     files
         .par_iter()
         .filter_map(|path| {
-            let source = std::fs::read_to_string(path).ok()?;
+            let source = match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("error: could not read {}: {e}", path.display());
+                    return None;
+                }
+            };
             let ctx = LintContext::new(path, &source);
             let diagnostics = rules.iter().flat_map(|rule| rule.check_source(&ctx)).collect();
             Some((path.clone(), diagnostics))
