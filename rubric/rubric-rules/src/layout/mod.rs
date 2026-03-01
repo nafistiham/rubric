@@ -25,3 +25,4 @@ pub mod space_after_colon;
 pub mod space_around_keyword;
 pub mod rescue_ensure_alignment;
 pub mod end_alignment;
+pub mod case_indentation;
