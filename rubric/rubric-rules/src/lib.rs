@@ -27,3 +27,4 @@ pub use style::symbol_array::SymbolArray;
 pub use style::word_array::WordArray;
 pub use style::negated_if::NegatedIf;
 pub use style::unless_else::UnlessElse;
+pub use style::redundant_return::RedundantReturn;
