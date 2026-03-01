@@ -10,7 +10,7 @@ const CORRECTED: &str = include_str!("fixtures/style/string_literals/corrected.r
 fn detects_double_quoted_strings() {
     let source = OFFENDING;
     let ctx = LintContext::new(Path::new("test.rb"), source);
-    let rules: Vec<Box<dyn rubric_core::Rule>> = vec![Box::new(StringLiterals)];
+    let rules: Vec<Box<dyn rubric_core::Rule + Send + Sync>> = vec![Box::new(StringLiterals)];
     let diags = walk(source.as_bytes(), &ctx, &rules);
     // "hello" and "world" should be flagged; "it's fine" and "has\nnewline" should not
     assert_eq!(diags.len(), 2, "expected 2 violations");
@@ -20,7 +20,7 @@ fn detects_double_quoted_strings() {
 #[test]
 fn no_violation_on_corrected() {
     let ctx = LintContext::new(Path::new("test.rb"), CORRECTED);
-    let rules: Vec<Box<dyn rubric_core::Rule>> = vec![Box::new(StringLiterals)];
+    let rules: Vec<Box<dyn rubric_core::Rule + Send + Sync>> = vec![Box::new(StringLiterals)];
     let diags = walk(CORRECTED.as_bytes(), &ctx, &rules);
     assert!(diags.is_empty(), "expected no violations on corrected fixture, got: {:?}", diags);
 }
@@ -31,7 +31,7 @@ fn no_false_positive_on_interpolation_fragment() {
     // containing "#{". Such nodes must not be flagged as missing single-quotes.
     let source = r#"x = "hello #{name} world""#;
     let ctx = LintContext::new(Path::new("test.rb"), source);
-    let rules: Vec<Box<dyn rubric_core::Rule>> = vec![Box::new(StringLiterals)];
+    let rules: Vec<Box<dyn rubric_core::Rule + Send + Sync>> = vec![Box::new(StringLiterals)];
     let diags = walk(source.as_bytes(), &ctx, &rules);
     assert!(
         diags.is_empty(),
