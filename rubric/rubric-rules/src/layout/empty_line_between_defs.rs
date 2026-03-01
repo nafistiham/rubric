@@ -12,38 +12,24 @@ impl Rule for EmptyLineBetweenDefs {
         let lines = &ctx.lines;
         let n = lines.len();
 
-        // Scan for `end` on its own line (possibly at any indentation),
-        // then look at the very next non-blank line. If it starts with `def`,
-        // and there was no blank line in between, flag the second `def`.
+        // Scan for `end` on its own line, then check the very next line.
+        // If it's a `def` with no blank line between, flag the second `def`.
         let mut i = 0;
         while i < n {
             let trimmed = lines[i].trim();
-            if trimmed == "end" {
-                // Find the next non-blank line
-                let mut j = i + 1;
-                let mut found_blank = false;
-                while j < n {
-                    let t = lines[j].trim();
-                    if t.is_empty() {
-                        found_blank = true;
-                        break;
-                    }
-                    if t.starts_with("def ") || t == "def" {
-                        if !found_blank {
-                            // Flag the def line
-                            let line_start = ctx.line_start_offsets[j];
-                            let def_end = line_start + "def".len() as u32;
-                            diags.push(Diagnostic {
-                                rule: self.name(),
-                                message: "Missing empty line between method definitions.".into(),
-                                range: TextRange::new(line_start, def_end),
-                                severity: Severity::Warning,
-                            });
-                        }
-                        break;
-                    }
-                    // Next non-blank line is not `def`, stop
-                    break;
+            if trimmed == "end" && i + 1 < n {
+                let next = lines[i + 1].trim();
+                // If the next line is directly a `def`, flag it (no blank line in between)
+                if next.starts_with("def ") || next == "def" {
+                    let j = i + 1;
+                    let line_start = ctx.line_start_offsets[j];
+                    let def_end = line_start + "def".len() as u32;
+                    diags.push(Diagnostic {
+                        rule: self.name(),
+                        message: "Missing empty line between method definitions.".into(),
+                        range: TextRange::new(line_start, def_end),
+                        severity: Severity::Warning,
+                    });
                 }
             }
             i += 1;
