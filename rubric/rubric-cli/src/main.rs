@@ -1,5 +1,6 @@
 mod runner;
 mod config;
+mod commands;
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
@@ -41,6 +42,15 @@ enum Commands {
         /// Path to format (file or directory)
         #[arg(default_value = ".")]
         path: std::path::PathBuf,
+    },
+    /// Convert .rubocop.yml to rubric.toml
+    Migrate {
+        /// Path to .rubocop.yml (default: .rubocop.yml)
+        #[arg(default_value = ".rubocop.yml")]
+        input: std::path::PathBuf,
+        /// Output path (default: rubric.toml)
+        #[arg(long, default_value = "rubric.toml")]
+        output: std::path::PathBuf,
     },
 }
 
@@ -155,6 +165,10 @@ fn main() -> Result<()> {
                     println!("No violations found.");
                 }
             }
+        }
+
+        Commands::Migrate { input, output } => {
+            commands::migrate::run(&input, &output)?;
         }
 
         Commands::Fmt { path } => {
