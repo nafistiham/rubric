@@ -79,7 +79,13 @@ fn main() -> Result<()> {
                 for (file, source, diagnostics) in &results {
                     let fixes: Vec<_> = diagnostics.iter()
                         .filter_map(|d| {
-                            rules.iter().find(|r| r.name() == d.rule)?.fix(d)
+                            let fix = rules.iter().find(|r| r.name() == d.rule)?.fix(d)?;
+                            // Only apply safe fixes — unsafe fixes require --fix-unsafe (not yet implemented)
+                            if fix.safety == FixSafety::Safe {
+                                Some(fix)
+                            } else {
+                                None
+                            }
                         })
                         .collect();
                     if !fixes.is_empty() {
