@@ -6,3 +6,4 @@ pub mod empty_lines;
 pub mod space_after_comma;
 pub mod space_before_comment;
 pub mod space_around_operators;
+pub mod space_inside_parens;
