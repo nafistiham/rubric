@@ -14,6 +14,16 @@ fn detects_multiple_blank_lines() {
 }
 
 #[test]
+fn each_excess_blank_line_reported() {
+    // Three consecutive blank lines should produce two violations
+    // (one for blank_run==2, one for blank_run==3)
+    let source = "def foo\nend\n\n\n\ndef bar\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = EmptyLines.check_source(&ctx);
+    assert_eq!(diags.len(), 2, "three blank lines should produce two violations, got: {:?}", diags);
+}
+
+#[test]
 fn no_violation_on_single_blank_line() {
     let ctx = LintContext::new(Path::new("test.rb"), CORRECTED);
     let diags = EmptyLines.check_source(&ctx);

@@ -13,7 +13,7 @@ impl Rule for EmptyLines {
         for (i, line) in ctx.lines.iter().enumerate() {
             if line.trim().is_empty() {
                 blank_run += 1;
-                if blank_run == 2 {
+                if blank_run >= 2 {
                     let start = ctx.line_start_offsets[i];
                     diags.push(Diagnostic {
                         rule: self.name(),
