@@ -16,6 +16,7 @@ pub use layout::multiline_method_call_indentation::MultilineMethodCallIndentatio
 pub use layout::hash_alignment::HashAlignment;
 pub use layout::closing_parenthesis_indentation::ClosingParenthesisIndentation;
 pub use layout::leading_comment_space::LeadingCommentSpace;
+pub use layout::space_around_block_parameters::SpaceAroundBlockParameters;
 
 pub use style::frozen_string_literal_comment::FrozenStringLiteralComment;
 pub use style::string_literals::StringLiterals;
