@@ -1,0 +1,35 @@
+# frozen_string_literal: true
+
+require "bundler/gem_tasks"
+
+# Cross-compilation platform targets
+PLATFORMS = %w[
+  x86_64-linux
+  aarch64-linux
+  x86_64-darwin
+  arm64-darwin
+].freeze
+
+desc "Build the gem for the current platform"
+task :build do
+  system("cargo build --release") || abort("Cargo build failed")
+  Rake::Task["gem:build"].invoke
+end
+
+desc "Build platform-specific gems for all targets"
+task "build:all" do
+  PLATFORMS.each do |platform|
+    puts "Building for #{platform}..."
+    system("cargo build --release --target #{rust_target(platform)}") ||
+      warn("Warning: build failed for #{platform}")
+  end
+end
+
+def rust_target(ruby_platform)
+  {
+    "x86_64-linux"   => "x86_64-unknown-linux-gnu",
+    "aarch64-linux"  => "aarch64-unknown-linux-gnu",
+    "x86_64-darwin"  => "x86_64-apple-darwin",
+    "arm64-darwin"   => "aarch64-apple-darwin",
+  }.fetch(ruby_platform, ruby_platform)
+end

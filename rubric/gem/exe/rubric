@@ -1,0 +1,7 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# This file is a placeholder. The actual rubric binary is installed
+# by the platform-specific gem (e.g., rubric-arm64-darwin).
+# See: https://github.com/nafistiham/rubric
+require "rubric"
