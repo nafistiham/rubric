@@ -21,3 +21,4 @@ pub mod while_until_modifier;
 pub mod while_until_do;
 pub mod and_or;
 pub mod not_keyword;
+pub mod redundant_begin;
