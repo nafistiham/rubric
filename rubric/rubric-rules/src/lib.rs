@@ -24,3 +24,4 @@ pub use style::string_literals::StringLiterals;
 pub use style::trailing_comma_in_arguments::TrailingCommaInArguments;
 pub use style::hash_syntax::HashSyntax;
 pub use style::symbol_array::SymbolArray;
+pub use style::word_array::WordArray;
