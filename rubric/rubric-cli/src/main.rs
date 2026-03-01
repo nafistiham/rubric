@@ -13,7 +13,7 @@ use rubric_rules::{
     LeadingCommentSpace, SpaceAroundBlockParameters, FirstHashElementIndentation,
     FrozenStringLiteralComment, StringLiterals, TrailingCommaInArguments, HashSyntax, SymbolArray,
     WordArray, NegatedIf, UnlessElse, RedundantReturn, GuardClause, SafeNavigation,
-    UselessAssignment,
+    UselessAssignment, UnusedMethodArgument,
 };
 use crate::config::Config;
 
@@ -100,6 +100,7 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(GuardClause),
         Box::new(SafeNavigation),
         Box::new(UselessAssignment),
+        Box::new(UnusedMethodArgument),
     ]
 }
 

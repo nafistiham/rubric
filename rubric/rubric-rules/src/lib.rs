@@ -33,3 +33,4 @@ pub use style::guard_clause::GuardClause;
 pub use style::safe_navigation::SafeNavigation;
 
 pub use lint::useless_assignment::UselessAssignment;
+pub use lint::unused_method_argument::UnusedMethodArgument;
