@@ -1,0 +1,60 @@
+use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
+
+pub struct BlockDelimiters;
+
+impl Rule for BlockDelimiters {
+    fn name(&self) -> &'static str {
+        "Style/BlockDelimiters"
+    }
+
+    fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
+        let mut diags = Vec::new();
+        let lines = &ctx.lines;
+        let n = lines.len();
+
+        // Track open `{` that appear at end of a line (after a method call).
+        // If the matching `}` is on a different line, flag the `{`.
+        let mut i = 0;
+        while i < n {
+            let line = &lines[i];
+            let trimmed = line.trim_end();
+
+            // Check if line ends with `{` (block opener at end of line)
+            if trimmed.ends_with('{') {
+                // Find the `{` position
+                let brace_pos = trimmed.rfind('{').expect("just confirmed it ends with {");
+                let before_brace = &trimmed[..brace_pos].trim_end();
+                // Only flag if there's a method call before the `{`
+                // (i.e., line doesn't just start with `{`)
+                if !before_brace.is_empty() {
+                    // Now check if the matching `}` is on a different line
+                    let mut depth = 1i32;
+                    let mut j = i + 1;
+                    while j < n && depth > 0 {
+                        let next = &lines[j];
+                        for ch in next.chars() {
+                            if ch == '{' { depth += 1; }
+                            else if ch == '}' { depth -= 1; }
+                            if depth == 0 { break; }
+                        }
+                        if depth > 0 { j += 1; }
+                    }
+                    // If j != i, `}` is on a different line — multi-line brace block
+                    if j > i {
+                        let line_start = ctx.line_start_offsets[i] as usize;
+                        let abs_pos = (line_start + brace_pos) as u32;
+                        diags.push(Diagnostic {
+                            rule: self.name(),
+                            message: "Multi-line block uses `{}` instead of `do..end`.".into(),
+                            range: TextRange::new(abs_pos, abs_pos + 1),
+                            severity: Severity::Warning,
+                        });
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        diags
+    }
+}
