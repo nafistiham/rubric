@@ -16,3 +16,4 @@ pub mod trailing_comma_in_array_literal;
 pub mod symbol_proc;
 pub mod optional_arguments;
 pub mod mutable_constant;
+pub mod if_unless_modifier;
