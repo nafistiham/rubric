@@ -12,6 +12,7 @@ pub use layout::space_around_operators::SpaceAroundOperators;
 pub use layout::space_inside_parens::SpaceInsideParens;
 pub use layout::space_inside_array_literal_brackets::SpaceInsideArrayLiteralBrackets;
 pub use layout::space_inside_hash_literal_braces::SpaceInsideHashLiteralBraces;
+pub use layout::multiline_method_call_indentation::MultilineMethodCallIndentation;
 
 pub use style::frozen_string_literal_comment::FrozenStringLiteralComment;
 pub use style::string_literals::StringLiterals;

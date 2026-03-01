@@ -9,6 +9,7 @@ use rubric_rules::{
     TrailingNewlines, IndentationWidth, LineLength, EmptyLines,
     SpaceAfterComma, SpaceBeforeComment, SpaceAroundOperators, SpaceInsideParens,
     SpaceInsideArrayLiteralBrackets, SpaceInsideHashLiteralBraces,
+    MultilineMethodCallIndentation,
     FrozenStringLiteralComment, StringLiterals, TrailingCommaInArguments,
 };
 use crate::config::Config;
@@ -81,6 +82,7 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(SpaceInsideParens),
         Box::new(SpaceInsideArrayLiteralBrackets),
         Box::new(SpaceInsideHashLiteralBraces),
+        Box::new(MultilineMethodCallIndentation),
     ]
 }
 
