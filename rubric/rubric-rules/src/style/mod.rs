@@ -12,3 +12,4 @@ pub mod safe_navigation;
 pub mod block_delimiters;
 pub mod lambda;
 pub mod proc_new;
+pub mod trailing_comma_in_array_literal;
