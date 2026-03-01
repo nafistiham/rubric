@@ -1,0 +1,2 @@
+p /pattern/
+puts /foo/
