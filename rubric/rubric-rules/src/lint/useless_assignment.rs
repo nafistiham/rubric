@@ -31,6 +31,10 @@ impl Rule for UselessAssignment {
                 if t.starts_with("def ") || t.starts_with("if ") || t.starts_with("unless ")
                     || t.starts_with("do ") || t == "do" || t.starts_with("begin")
                     || t.starts_with("case ")
+                    || t.starts_with("while ") || t == "while"
+                    || t.starts_with("until ") || t == "until"
+                    || t.starts_with("for ")
+                    || t == "loop" || t.ends_with(" loop")
                 {
                     depth += 1;
                 }
