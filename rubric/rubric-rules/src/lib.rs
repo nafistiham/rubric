@@ -1,5 +1,6 @@
 pub mod layout;
 pub mod style;
+pub mod lint;
 
 pub use layout::trailing_whitespace::TrailingWhitespace;
 pub use layout::trailing_newlines::TrailingNewlines;
@@ -30,3 +31,5 @@ pub use style::unless_else::UnlessElse;
 pub use style::redundant_return::RedundantReturn;
 pub use style::guard_clause::GuardClause;
 pub use style::safe_navigation::SafeNavigation;
+
+pub use lint::useless_assignment::UselessAssignment;
