@@ -11,7 +11,7 @@ use rubric_rules::{
     SpaceInsideArrayLiteralBrackets, SpaceInsideHashLiteralBraces,
     MultilineMethodCallIndentation, HashAlignment, ClosingParenthesisIndentation,
     LeadingCommentSpace, SpaceAroundBlockParameters, FirstHashElementIndentation,
-    FrozenStringLiteralComment, StringLiterals, TrailingCommaInArguments,
+    FrozenStringLiteralComment, StringLiterals, TrailingCommaInArguments, HashSyntax,
 };
 use crate::config::Config;
 
@@ -89,6 +89,7 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(LeadingCommentSpace),
         Box::new(SpaceAroundBlockParameters),
         Box::new(FirstHashElementIndentation),
+        Box::new(HashSyntax),
     ]
 }
 
