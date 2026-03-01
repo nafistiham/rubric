@@ -16,7 +16,7 @@ pub fn collect_ruby_files(path: &Path) -> Vec<PathBuf> {
 }
 
 /// Run all rules against the given context, returning all diagnostics.
-// Used by tests; not called from production code (run_all_files inlines this logic).
+/// Runs both source-level checks and AST-level checks (via walker).
 #[allow(dead_code)]
 pub fn run_rules_on_source(
     ctx: &LintContext,
@@ -26,11 +26,11 @@ pub fn run_rules_on_source(
 }
 
 /// Process multiple files in parallel using Rayon.
-/// Returns (path, diagnostics) pairs, order is non-deterministic.
+/// Returns (path, source, diagnostics) triples, order is non-deterministic.
 pub fn run_all_files(
     files: &[PathBuf],
     rules: &[Box<dyn Rule + Send + Sync>],
-) -> Vec<(PathBuf, Vec<rubric_core::Diagnostic>)> {
+) -> Vec<(PathBuf, String, Vec<rubric_core::Diagnostic>)> {
     files
         .par_iter()
         .filter_map(|path| {
@@ -42,8 +42,18 @@ pub fn run_all_files(
                 }
             };
             let ctx = LintContext::new(path, &source);
-            let diagnostics = rules.iter().flat_map(|rule| rule.check_source(&ctx)).collect();
-            Some((path.clone(), diagnostics))
+
+            // Source-level checks
+            let mut diagnostics: Vec<rubric_core::Diagnostic> =
+                rules.iter().flat_map(|rule| rule.check_source(&ctx)).collect();
+
+            // AST-level checks — only if any rule registers node_kinds
+            if rules.iter().any(|r| !r.node_kinds().is_empty()) {
+                let ast_diags = rubric_core::walk(source.as_bytes(), &ctx, rules);
+                diagnostics.extend(ast_diags);
+            }
+
+            Some((path.clone(), source, diagnostics))
         })
         .collect()
 }
@@ -234,8 +244,43 @@ mod tests {
 
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].0, f1);
-        assert_eq!(results[0].1.len(), 1); // 1 violation in a.rb
+        assert_eq!(results[0].2.len(), 1); // 1 violation in a.rb
         assert_eq!(results[1].0, f2);
-        assert_eq!(results[1].1.len(), 0); // 0 violations in b.rb
+        assert_eq!(results[1].2.len(), 0); // 0 violations in b.rb
+    }
+
+    #[test]
+    fn run_all_files_returns_source_string() {
+        use rubric_rules::TrailingWhitespace;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let f1 = dir.path().join("src_test.rb");
+        std::fs::write(&f1, "x = 1\n").unwrap();
+
+        let rules: Vec<Box<dyn Rule + Send + Sync>> = vec![Box::new(TrailingWhitespace)];
+        let files = vec![f1.clone()];
+        let results = run_all_files(&files, &rules);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, f1);
+        assert_eq!(results[0].1, "x = 1\n"); // source is returned
+        assert_eq!(results[0].2.len(), 0);
+    }
+
+    #[test]
+    fn run_all_files_runs_ast_level_rules() {
+        use rubric_rules::StringLiterals;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let f1 = dir.path().join("strings.rb");
+        // Double-quoted strings without interpolation should be flagged
+        std::fs::write(&f1, "x = \"hello\"\n").unwrap();
+
+        let rules: Vec<Box<dyn Rule + Send + Sync>> = vec![Box::new(StringLiterals)];
+        let files = vec![f1.clone()];
+        let results = run_all_files(&files, &rules);
+
+        assert_eq!(results.len(), 1);
+        // StringLiterals uses AST walker — should detect double-quoted string
+        assert_eq!(results[0].2.len(), 1);
+        assert_eq!(results[0].2[0].rule, "Style/StringLiterals");
     }
 }

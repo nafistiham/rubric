@@ -169,12 +169,12 @@ pub fn node_kind_name<'pr>(node: &ruby_prism::Node<'pr>) -> &'static str {
 /// Internal walker that holds references to context and rules during traversal.
 struct RuleWalker<'a, 'ctx> {
     ctx: &'a LintContext<'ctx>,
-    rules: &'a [Box<dyn Rule>],
+    rules: &'a [Box<dyn Rule + Send + Sync>],
     diagnostics: Vec<Diagnostic>,
 }
 
 impl<'a, 'ctx> RuleWalker<'a, 'ctx> {
-    fn new(ctx: &'a LintContext<'ctx>, rules: &'a [Box<dyn Rule>]) -> Self {
+    fn new(ctx: &'a LintContext<'ctx>, rules: &'a [Box<dyn Rule + Send + Sync>]) -> Self {
         Self {
             ctx,
             rules,
@@ -207,7 +207,7 @@ impl<'pr> ruby_prism::Visit<'pr> for RuleWalker<'_, '_> {
 /// that registered the matching kind via `node_kinds()`.
 ///
 /// Returns all diagnostics produced during the walk.
-pub fn walk(source: &[u8], ctx: &LintContext<'_>, rules: &[Box<dyn Rule>]) -> Vec<Diagnostic> {
+pub fn walk(source: &[u8], ctx: &LintContext<'_>, rules: &[Box<dyn Rule + Send + Sync>]) -> Vec<Diagnostic> {
     // Skip walk if no rule cares about any node kind
     if rules.iter().all(|r| r.node_kinds().is_empty()) {
         return Vec::new();
@@ -273,7 +273,7 @@ mod tests {
         let ctx = LintContext::new(path, source_str);
 
         let rule = StringVisitor::new();
-        let rules: Vec<Box<dyn Rule>> = vec![Box::new(rule)];
+        let rules: Vec<Box<dyn Rule + Send + Sync>> = vec![Box::new(rule)];
 
         let diags = walk(source, &ctx, &rules);
         assert!(diags.is_empty());
@@ -297,7 +297,7 @@ mod tests {
         let source = b"x = 1\n";
         let source_str = std::str::from_utf8(source).unwrap();
         let ctx = LintContext::new(Path::new("test.rb"), source_str);
-        let rules: Vec<Box<dyn Rule>> = vec![Box::new(SourceOnlyRule)];
+        let rules: Vec<Box<dyn Rule + Send + Sync>> = vec![Box::new(SourceOnlyRule)];
 
         let diags = walk(source, &ctx, &rules);
         assert!(diags.is_empty());
@@ -338,7 +338,7 @@ mod tests {
         let source = b"x = \"hello\"\ny = \"world\"\n";
         let source_str = std::str::from_utf8(source).unwrap();
         let ctx = LintContext::new(Path::new("test.rb"), source_str);
-        let rules: Vec<Box<dyn Rule>> =
+        let rules: Vec<Box<dyn Rule + Send + Sync>> =
             vec![Box::new(CountingStringRule { counter: counter_clone })];
 
         let diags = walk(source, &ctx, &rules);
@@ -382,7 +382,7 @@ mod tests {
         let source = b"x = \"hello\"\n";
         let source_str = std::str::from_utf8(source).unwrap();
         let ctx = LintContext::new(Path::new("test.rb"), source_str);
-        let rules: Vec<Box<dyn Rule>> = vec![Box::new(AlwaysWarnOnString)];
+        let rules: Vec<Box<dyn Rule + Send + Sync>> = vec![Box::new(AlwaysWarnOnString)];
 
         let diags = walk(source, &ctx, &rules);
         assert_eq!(diags.len(), 1);
