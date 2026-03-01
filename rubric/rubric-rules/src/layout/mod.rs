@@ -29,3 +29,4 @@ pub mod case_indentation;
 pub mod indentation_consistency;
 pub mod space_inside_string_interpolation;
 pub mod space_before_block_braces;
+pub mod multiline_operation_indentation;
