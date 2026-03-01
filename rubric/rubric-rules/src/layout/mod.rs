@@ -10,3 +10,4 @@ pub mod space_inside_parens;
 pub mod space_inside_array_literal_brackets;
 pub mod space_inside_hash_literal_braces;
 pub mod multiline_method_call_indentation;
+pub mod hash_alignment;
