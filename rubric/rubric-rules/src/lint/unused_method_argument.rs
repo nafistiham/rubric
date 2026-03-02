@@ -72,7 +72,13 @@ impl Rule for UnusedMethodArgument {
             for arg in &args {
                 // Clean up arg (remove default values, splats, etc.)
                 let arg_clean = arg.trim_start_matches('*').trim_start_matches('&');
-                let arg_name = arg_clean.split('=').next().unwrap_or("").trim();
+                let arg_name_raw = arg_clean.split('=').next().unwrap_or("").trim();
+                // Handle keyword args: "bar: 'default'" -> "bar", "bar:" -> "bar"
+                let arg_name = if let Some(colon_pos) = arg_name_raw.find(':') {
+                    arg_name_raw[..colon_pos].trim()
+                } else {
+                    arg_name_raw
+                };
 
                 if arg_name.is_empty() || arg_name.starts_with('_') {
                     continue;
@@ -88,17 +94,24 @@ impl Rule for UnusedMethodArgument {
                     let arg_len = arg_bytes.len();
 
                     let mut pos = 0;
-                    let mut in_string: Option<u8> = None;
+                    let mut in_single_string = false; // Only skip single-quoted (no interpolation)
 
                     while pos < body_len {
                         let b = body_bytes[pos];
-                        match in_string {
-                            Some(_) if b == b'\\' => { pos += 2; continue; }
-                            Some(delim) if b == delim => { in_string = None; pos += 1; continue; }
-                            Some(_) => { pos += 1; continue; }
-                            None if b == b'"' || b == b'\'' => { in_string = Some(b); pos += 1; continue; }
-                            None if b == b'#' => break,
-                            None => {}
+
+                        if in_single_string {
+                            if b == b'\\' { pos += 2; continue; }
+                            if b == b'\'' { in_single_string = false; }
+                            pos += 1;
+                            continue;
+                        }
+
+                        if b == b'\'' { in_single_string = true; pos += 1; continue; }
+
+                        if b == b'#' {
+                            // `#{` is string interpolation — not a comment, keep scanning
+                            let next = if pos + 1 < body_len { body_bytes[pos + 1] } else { 0 };
+                            if next != b'{' { break; } // actual comment — stop line
                         }
 
                         if pos + arg_len <= body_len && &body_bytes[pos..pos+arg_len] == arg_bytes {
