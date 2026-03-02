@@ -25,6 +25,14 @@ impl Rule for MultilineMethodDefinitionBraceLayout {
                     j -= 1;
                     let prev = lines[j].trim();
                     if prev.starts_with("def ") && prev.contains('(') {
+                        // Check if the def's parens are balanced on the same line.
+                        // If balanced, the def is complete — don't flag anything after it.
+                        let opens = prev.chars().filter(|&c| c == '(').count();
+                        let closes = prev.chars().filter(|&c| c == ')').count();
+                        if opens == closes {
+                            // Single-line def — not a multiline definition
+                            break; // Don't set is_multiline_def = true
+                        }
                         is_multiline_def = true;
                         break;
                     }
