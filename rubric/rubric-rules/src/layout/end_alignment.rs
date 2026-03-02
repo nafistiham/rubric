@@ -12,8 +12,11 @@ impl Rule for EndAlignment {
         let lines = &ctx.lines;
         let n = lines.len();
 
-        // Stack of (keyword, indentation) for openers
+        // Stack of indentation levels for block openers
         let mut indent_stack: Vec<usize> = Vec::new();
+        // Counter for inline if/unless/case expressions (result = if condition)
+        // Their `end` does NOT pop the outer stack
+        let mut inline_depth: usize = 0;
 
         let mut i = 0;
         while i < n {
@@ -21,15 +24,44 @@ impl Rule for EndAlignment {
             let trimmed = line.trim_start();
             let indent = line.len() - trimmed.len();
 
-            if trimmed.starts_with("def ") || trimmed == "def"
+            // Skip comments
+            if trimmed.starts_with('#') {
+                i += 1;
+                continue;
+            }
+
+            // Detect block/construct openers
+            let is_block_opener = trimmed.starts_with("def ") || trimmed == "def"
                 || trimmed.starts_with("class ") || trimmed.starts_with("module ")
                 || trimmed.starts_with("if ") || trimmed.starts_with("unless ")
                 || trimmed.starts_with("while ") || trimmed.starts_with("until ")
-                || trimmed.starts_with("for ") || trimmed.starts_with("begin")
-                || trimmed == "do" || trimmed.ends_with(" do") {
+                || trimmed.starts_with("for ") || trimmed == "begin"
+                || trimmed.starts_with("begin ") || trimmed.starts_with("case ")
+                || trimmed == "do" || trimmed.ends_with(" do") || trimmed.contains(" do |") || trimmed.contains(" do|");
+
+            // Detect inline if/unless/case assignments that open a block mid-line
+            // Pattern: something = if condition  (or unless/case)
+            let is_inline_opener = !is_block_opener && (
+                (trimmed.contains(" = if ") || trimmed.contains(" = unless ") || trimmed.contains(" = case "))
+                || (trimmed.contains("(if ") || trimmed.contains("(unless ") || trimmed.contains("(case "))
+            );
+
+            if is_block_opener {
                 indent_stack.push(indent);
-            } else if trimmed == "end" || trimmed.starts_with("end ") {
-                if let Some(expected_indent) = indent_stack.pop() {
+            } else if is_inline_opener {
+                inline_depth += 1;
+            }
+
+            // Detect end (including end.method chaining and end followed by other tokens)
+            let is_end = trimmed == "end"
+                || trimmed.starts_with("end ")
+                || trimmed.starts_with("end.");
+
+            if is_end {
+                if inline_depth > 0 {
+                    // This end closes an inline expression — don't pop the outer stack
+                    inline_depth -= 1;
+                } else if let Some(expected_indent) = indent_stack.pop() {
                     if indent != expected_indent {
                         let line_start = ctx.line_start_offsets[i];
                         diags.push(Diagnostic {
@@ -47,6 +79,7 @@ impl Rule for EndAlignment {
                     }
                 }
             }
+
             i += 1;
         }
 
