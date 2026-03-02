@@ -16,10 +16,23 @@ impl Rule for SpaceAroundOperators {
             let len = bytes.len();
             let mut j = 0;
             let mut in_string: Option<u8> = None;
+            let mut in_regex = false;
+
             while j < len {
                 let b = bytes[j];
 
-                // Handle string state
+                // ── Regex state: skip until unescaped `/` ────────────────────
+                if in_regex {
+                    match b {
+                        b'\\' => { j += 2; continue; }
+                        b'/' => { in_regex = false; }
+                        _ => {}
+                    }
+                    j += 1;
+                    continue;
+                }
+
+                // ── String state ─────────────────────────────────────────────
                 match in_string {
                     Some(_) if b == b'\\' => { j += 2; continue; }
                     Some(delim) if b == delim => { in_string = None; j += 1; continue; }
@@ -29,15 +42,75 @@ impl Rule for SpaceAroundOperators {
                     None => {}
                 }
 
-                // Check for multi-char operators first
+                // ── 3-char compound operators: ||=, &&= ──────────────────────
+                if j + 2 < len {
+                    let three = &bytes[j..j+3];
+                    if three == b"||=" || three == b"&&=" {
+                        let prev_ok = j == 0 || bytes[j-1] == b' ' || bytes[j-1] == b'\t';
+                        let next_ok = j + 3 >= len || bytes[j+3] == b' ' || bytes[j+3] == b'\t';
+                        if !prev_ok || !next_ok {
+                            let pos = (line_start + j) as u32;
+                            diags.push(Diagnostic {
+                                rule: self.name(),
+                                message: format!(
+                                    "Operator `{}` should be surrounded by spaces.",
+                                    std::str::from_utf8(three).unwrap_or("?")
+                                ),
+                                range: TextRange::new(pos, pos + 3),
+                                severity: Severity::Warning,
+                            });
+                        }
+                        j += 3;
+                        continue;
+                    }
+                }
+
+                // ── 2-char operators ─────────────────────────────────────────
                 if j + 1 < len {
                     let two = &bytes[j..j+2];
-                    // Skip compound operators: ==, !=, <=, >=, &&, ||, +=, -=, *=, /=, **
+
+                    // ** — exponentiation OR double-splat.
+                    // It's a double-splat (**opts / **hash) when:
+                    //   - the next char is an identifier char, AND
+                    //   - the preceding char is NOT an identifier/digit/closing bracket
+                    //     (i.e. we're after `(`, `,`, space, `{`, etc.)
+                    if two == b"**" {
+                        let next_b = if j + 2 < len { bytes[j+2] } else { 0 };
+                        let prev = if j > 0 { bytes[j-1] } else { 0 };
+                        if (next_b.is_ascii_alphabetic() || next_b == b'_')
+                            && !prev.is_ascii_alphanumeric() && prev != b')' && prev != b']'
+                        {
+                            // double-splat: **opts / **hash — no spacing required
+                            j += 2;
+                            continue;
+                        }
+                        // exponentiation — check spacing
+                        let prev_ok = j == 0 || bytes[j-1] == b' ' || bytes[j-1] == b'\t';
+                        let next_ok = j + 2 >= len || next_b == b' ' || next_b == b'\t' || next_b == b'\n';
+                        if !prev_ok || !next_ok {
+                            let pos = (line_start + j) as u32;
+                            diags.push(Diagnostic {
+                                rule: self.name(),
+                                message: "Operator `**` should be surrounded by spaces.".into(),
+                                range: TextRange::new(pos, pos + 2),
+                                severity: Severity::Warning,
+                            });
+                        }
+                        j += 2;
+                        continue;
+                    }
+
+                    // Skip ->
+                    if two == b"->" {
+                        j += 2;
+                        continue;
+                    }
+
+                    // Remaining two-char operators: ==, !=, <=, >=, &&, ||, +=, -=, *=, /=
                     if two == b"==" || two == b"!=" || two == b"<=" || two == b">="
                         || two == b"&&" || two == b"||" || two == b"+=" || two == b"-="
-                        || two == b"*=" || two == b"/=" || two == b"**"
+                        || two == b"*=" || two == b"/="
                     {
-                        // Check spacing around these two-char operators
                         let prev_ok = j == 0 || bytes[j-1] == b' ' || bytes[j-1] == b'\t';
                         let next_ok = j + 2 >= len || bytes[j+2] == b' ' || bytes[j+2] == b'\t' || bytes[j+2] == b'\n';
                         if !prev_ok || !next_ok {
@@ -55,33 +128,23 @@ impl Rule for SpaceAroundOperators {
                         j += 2;
                         continue;
                     }
-
-                    // Skip ->
-                    if two == b"->" {
-                        j += 2;
-                        continue;
-                    }
                 }
 
-                // Single-char operators: = + - * / < >
-                // Skip if part of a symbol literal `:foo`, string delimiter, etc.
+                // ── Single-char operators: = + - * / < > ────────────────────
                 match b {
                     b'=' => {
-                        // Already handled ==, !=, <=, >= above
-                        // Check this = is not part of those (we'd have advanced past them)
-                        // Check previous char to skip !=, <=, >= = at position j-1
                         let prev = if j > 0 { bytes[j-1] } else { 0 };
+                        // Skip trailing char of !=, <=, >=, ==
                         if prev == b'!' || prev == b'<' || prev == b'>' || prev == b'=' {
                             j += 1;
                             continue;
                         }
-                        // Check for => (hash rocket)
+                        // Skip => (hash rocket)
                         let next = if j + 1 < len { bytes[j+1] } else { 0 };
                         if next == b'>' {
                             j += 1;
                             continue;
                         }
-                        // Check spacing
                         let prev_ok = j == 0 || prev == b' ' || prev == b'\t';
                         let next_ok = next == b' ' || next == b'\t' || next == 0;
                         if !prev_ok || !next_ok {
@@ -94,18 +157,47 @@ impl Rule for SpaceAroundOperators {
                             });
                         }
                     }
-                    b'+' | b'-' | b'*' | b'/' => {
-                        // Skip if next is = (+=, -=, *=, /=) — handled above
+                    b'/' => {
+                        // `/` after an operator/open-paren/space is a regex start.
+                        let prev = if j > 0 { bytes[j-1] } else { 0 };
+                        if prev == b'=' || prev == b'(' || prev == b',' || prev == b'['
+                            || prev == b' ' || prev == b'\t' || prev == 0
+                        {
+                            in_regex = true;
+                            j += 1;
+                            continue;
+                        }
+                        // Otherwise treat as division and check spacing.
+                        let next = if j + 1 < len { bytes[j+1] } else { 0 };
+                        // Skip if it's /= (already handled in two-char section, but defensive)
+                        if next == b'=' {
+                            j += 1;
+                            continue;
+                        }
+                        let prev_ok = prev == b' ' || prev == b'\t';
+                        let next_ok = next == b' ' || next == b'\t';
+                        if !prev_ok || !next_ok {
+                            let pos = (line_start + j) as u32;
+                            diags.push(Diagnostic {
+                                rule: self.name(),
+                                message: "Operator `/` should be surrounded by spaces.".into(),
+                                range: TextRange::new(pos, pos + 1),
+                                severity: Severity::Warning,
+                            });
+                        }
+                    }
+                    b'+' | b'-' | b'*' => {
+                        // Skip if next is = (+=, -=, *=) — handled in two-char section
                         if j + 1 < len && bytes[j+1] == b'=' {
                             j += 1;
                             continue;
                         }
-                        // Skip ** — handled above
+                        // Skip * when next is * — already handled as ** above
                         if b == b'*' && j + 1 < len && bytes[j+1] == b'*' {
                             j += 1;
                             continue;
                         }
-                        // Skip unary: operator at start of line or after (, [, ,, space, = operator
+                        // Skip unary: operator at start of line or after (, [, ,, space, =, operator
                         let prev = if j > 0 { bytes[j-1] } else { 0 };
                         if prev == b'(' || prev == b'[' || prev == b',' || prev == b' '
                             || prev == b'\t' || prev == 0 || prev == b'=' || prev == b'+'
@@ -114,7 +206,7 @@ impl Rule for SpaceAroundOperators {
                             j += 1;
                             continue;
                         }
-                        // Skip if - is part of a negative number literal
+                        // Skip negative/positive number literals
                         let next = if j + 1 < len { bytes[j+1] } else { 0 };
                         if (b == b'-' || b == b'+') && next.is_ascii_digit() && prev != b' ' {
                             j += 1;
