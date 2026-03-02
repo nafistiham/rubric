@@ -89,5 +89,5 @@ jobs:
       - name: Build and push gem
         working-directory: rubric/gem
         run: |
-          gem build rubric.gemspec
-          gem push rubric-*.gem
+          gem build rubric-linter.gemspec
+          gem push rubric-linter-*.gem

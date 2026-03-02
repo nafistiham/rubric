@@ -3,7 +3,7 @@
 require_relative "lib/rubric/version"
 
 Gem::Specification.new do |spec|
-  spec.name    = "rubric"
+  spec.name    = "rubric-linter"
   spec.version = Rubric::VERSION
   spec.authors = ["Rubric Contributors"]
   spec.email   = []
