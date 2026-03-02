@@ -16,11 +16,10 @@ jobs:
             os: ubuntu-latest
             rust_target: x86_64-unknown-linux-gnu
           - platform: aarch64-linux
-            os: ubuntu-latest
+            os: ubuntu-22.04-arm
             rust_target: aarch64-unknown-linux-gnu
-            cross: true
           - platform: x86_64-darwin
-            os: macos-13
+            os: macos-latest
             rust_target: x86_64-apple-darwin
           - platform: arm64-darwin
             os: macos-latest
@@ -34,17 +33,8 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
-      - name: Install cross (Linux cross-compile)
-        if: matrix.cross
-        run: cargo install cross
-
       - name: Build binary
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.rust_target }}
-          else
-            cargo build --release --target ${{ matrix.rust_target }}
-          fi
+        run: cargo build --release --target ${{ matrix.rust_target }}
         working-directory: rubric
 
       - name: Package binary
