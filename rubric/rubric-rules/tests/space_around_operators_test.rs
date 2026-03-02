@@ -67,13 +67,13 @@ fn detects_missing_space_around_or_assign() {
     assert!(!diags.is_empty(), "x||=default should be flagged");
 }
 
-// ── True positive: ** exponentiation without spaces should still be detected ─
+// ── No violation: ** exponentiation uses no_space style (RuboCop default) ────
 #[test]
-fn detects_missing_space_around_exponentiation() {
-    let src = "result = a**b\n";
+fn no_violation_for_exponentiation_operator() {
+    let src = "x = 10**6\ny = a**b\n";
     let ctx = LintContext::new(Path::new("test.rb"), src);
     let diags = SpaceAroundOperators.check_source(&ctx);
-    assert!(!diags.is_empty(), "a**b should be flagged");
+    assert!(diags.is_empty(), "expected no violations for exponentiation, got: {:?}", diags);
 }
 
 // ── False positive: =~ regex match operator ───────────────────────────────────

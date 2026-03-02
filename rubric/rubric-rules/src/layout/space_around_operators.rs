@@ -110,18 +110,7 @@ impl Rule for SpaceAroundOperators {
                             j += 2;
                             continue;
                         }
-                        // exponentiation — check spacing
-                        let prev_ok = j == 0 || bytes[j-1] == b' ' || bytes[j-1] == b'\t';
-                        let next_ok = j + 2 >= len || next_b == b' ' || next_b == b'\t' || next_b == b'\n';
-                        if !prev_ok || !next_ok {
-                            let pos = (line_start + j) as u32;
-                            diags.push(Diagnostic {
-                                rule: self.name(),
-                                message: "Operator `**` should be surrounded by spaces.".into(),
-                                range: TextRange::new(pos, pos + 2),
-                                severity: Severity::Warning,
-                            });
-                        }
+                        // exponentiation — no spacing required (RuboCop default: no_space style)
                         j += 2;
                         continue;
                     }
