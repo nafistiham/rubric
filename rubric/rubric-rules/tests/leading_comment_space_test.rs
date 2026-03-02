@@ -21,3 +21,11 @@ fn no_violation_with_space_after_hash() {
     let diags = LeadingCommentSpace.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+#[test]
+fn no_violation_for_double_hash_yard_comments() {
+    let src = "## @param name [String] the name\n## @return [void]\ndef foo(name)\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = LeadingCommentSpace.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for ## YARD comments, got: {:?}", diags);
+}

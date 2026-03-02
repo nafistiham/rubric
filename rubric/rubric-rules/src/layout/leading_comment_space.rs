@@ -28,6 +28,11 @@ impl Rule for LeadingCommentSpace {
                 continue;
             }
 
+            // Skip `##` (YARD doc comment markers, RDoc section headers)
+            if bytes[1] == b'#' {
+                continue;
+            }
+
             // Skip encoding/magic comments like `# encoding:`, `# frozen_string_literal:`
             let after_hash = &trimmed[1..];
             if after_hash.starts_with(" encoding:") || after_hash.starts_with(" frozen_string_literal:") {
