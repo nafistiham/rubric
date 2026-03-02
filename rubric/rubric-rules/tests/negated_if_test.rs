@@ -21,3 +21,32 @@ fn no_violation_with_unless() {
     let diags = NegatedIf.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+// ── Modifier-form `if !` must be detected ────────────────────────────────────
+// `do_something if !condition` — `if` is in modifier position after an
+// expression. The current check only fires when `if` is the first token.
+#[test]
+fn detects_modifier_negated_if() {
+    let src = "def foo\n  do_something if !condition\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NegatedIf.check_source(&ctx);
+    assert!(!diags.is_empty(), "modifier `if !` should be flagged");
+    assert!(diags.iter().all(|d| d.rule == "Style/NegatedIf"));
+}
+
+#[test]
+fn detects_return_modifier_negated_if() {
+    let src = "def bar\n  return x if !flag\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NegatedIf.check_source(&ctx);
+    assert!(!diags.is_empty(), "modifier `if !` after return should be flagged");
+}
+
+// ── Block-form `if !` still fires ────────────────────────────────────────────
+#[test]
+fn still_detects_block_negated_if() {
+    let src = "if !valid?\n  puts 'bad'\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NegatedIf.check_source(&ctx);
+    assert!(!diags.is_empty(), "block-form `if !` should still be flagged");
+}
