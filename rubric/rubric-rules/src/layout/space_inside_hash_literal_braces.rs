@@ -29,6 +29,50 @@ impl Rule for SpaceInsideHashLiteralBraces {
                     None => {}
                 }
 
+                // Skip %r{...} and other %r delimiters — regex literals
+                if b == b'%' && j + 1 < len && bytes[j + 1] == b'r' {
+                    j += 2;
+                    if j < len {
+                        let delim = bytes[j];
+                        j += 1;
+                        if delim == b'{' {
+                            let mut depth = 1usize;
+                            while j < len && depth > 0 {
+                                match bytes[j] {
+                                    b'\\' => { j += 2; }
+                                    b'{' => { depth += 1; j += 1; }
+                                    b'}' => { depth -= 1; j += 1; }
+                                    _ => { j += 1; }
+                                }
+                            }
+                        } else {
+                            while j < len && bytes[j] != delim {
+                                if bytes[j] == b'\\' { j += 2; } else { j += 1; }
+                            }
+                            if j < len { j += 1; }
+                        }
+                    }
+                    continue;
+                }
+
+                // Skip /regex/ literals
+                if b == b'/' {
+                    let prev = if j > 0 { bytes[j - 1] } else { 0 };
+                    if prev == b'=' || prev == b'(' || prev == b','
+                        || prev == b'[' || prev == b' ' || prev == b'\t' || prev == 0
+                    {
+                        j += 1;
+                        while j < len {
+                            match bytes[j] {
+                                b'\\' => { j += 2; }
+                                b'/' => { j += 1; break; }
+                                _ => { j += 1; }
+                            }
+                        }
+                        continue;
+                    }
+                }
+
                 // Detect `{` not followed by space and not empty `{}`
                 if b == b'{' {
                     let next = if j + 1 < len { bytes[j+1] } else { 0 };

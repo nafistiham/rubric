@@ -21,3 +21,19 @@ fn no_violation_with_space_before_block_brace() {
     let diags = SpaceBeforeBlockBraces.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+#[test]
+fn no_violation_for_regex_quantifiers() {
+    let src = "x = str.gsub(/(\\d{2})(\\d{7})/, '\\\\1-\\\\2')\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceBeforeBlockBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for regex quantifiers, got: {:?}", diags);
+}
+
+#[test]
+fn no_violation_for_percent_r_regex() {
+    let src = "URL_RE = %r{\\Ahttp(s?)://[^/]+}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceBeforeBlockBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for %r{{}} regex, got: {:?}", diags);
+}

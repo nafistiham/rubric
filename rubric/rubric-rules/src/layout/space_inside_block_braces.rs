@@ -37,6 +37,50 @@ impl Rule for SpaceInsideBlockBraces {
                     None => {}
                 }
 
+                // Skip %r{...} and other %r delimiters — regex literals
+                if b == b'%' && pos + 1 < n && bytes[pos + 1] == b'r' {
+                    pos += 2;
+                    if pos < n {
+                        let delim = bytes[pos];
+                        pos += 1;
+                        if delim == b'{' {
+                            let mut depth = 1usize;
+                            while pos < n && depth > 0 {
+                                match bytes[pos] {
+                                    b'\\' => { pos += 2; }
+                                    b'{' => { depth += 1; pos += 1; }
+                                    b'}' => { depth -= 1; pos += 1; }
+                                    _ => { pos += 1; }
+                                }
+                            }
+                        } else {
+                            while pos < n && bytes[pos] != delim {
+                                if bytes[pos] == b'\\' { pos += 2; } else { pos += 1; }
+                            }
+                            if pos < n { pos += 1; }
+                        }
+                    }
+                    continue;
+                }
+
+                // Skip /regex/ literals
+                if b == b'/' {
+                    let prev = if pos > 0 { bytes[pos - 1] } else { 0 };
+                    if prev == b'=' || prev == b'(' || prev == b','
+                        || prev == b'[' || prev == b' ' || prev == b'\t' || prev == 0
+                    {
+                        pos += 1;
+                        while pos < n {
+                            match bytes[pos] {
+                                b'\\' => { pos += 2; }
+                                b'/' => { pos += 1; break; }
+                                _ => { pos += 1; }
+                            }
+                        }
+                        continue;
+                    }
+                }
+
                 if b == b'{' {
                     let next = if pos + 1 < n { bytes[pos + 1] } else { 0 };
 
