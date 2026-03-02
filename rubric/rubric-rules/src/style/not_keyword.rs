@@ -36,8 +36,8 @@ impl Rule for NotKeyword {
                 }
 
                 if j + pat_len <= len && &bytes[j..j + pat_len] == pattern {
-                    // Word boundary before
-                    let before_ok = j == 0 || (!bytes[j - 1].is_ascii_alphanumeric() && bytes[j - 1] != b'_');
+                    // Word boundary before — also exclude `.` so `.not(` (method call) is not flagged
+                    let before_ok = j == 0 || (!bytes[j - 1].is_ascii_alphanumeric() && bytes[j - 1] != b'_' && bytes[j - 1] != b'.');
                     // Word boundary after
                     let after_pos = j + pat_len;
                     let after_ok = after_pos >= len || (!bytes[after_pos].is_ascii_alphanumeric() && bytes[after_pos] != b'_');

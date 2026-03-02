@@ -75,3 +75,30 @@ fn detects_missing_space_around_exponentiation() {
     let diags = SpaceAroundOperators.check_source(&ctx);
     assert!(!diags.is_empty(), "a**b should be flagged");
 }
+
+// ── False positive: =~ regex match operator ───────────────────────────────────
+#[test]
+fn no_violation_for_regex_match_operator() {
+    let src = "result = net =~ addr\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for =~ operator, got: {:?}", diags);
+}
+
+// ── False positive: setter method definition ──────────────────────────────────
+#[test]
+fn no_violation_for_setter_method_definition() {
+    let src = "def bot=(val)\n  @bot = val\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for setter method def, got: {:?}", diags);
+}
+
+// ── False positive: %r{...} percent-regex content ────────────────────────────
+#[test]
+fn no_violation_for_percent_r_regex_content() {
+    let src = "MENTION_RE = %r{(?<![=/[:word:]])@(([a-z0-9]+)(?:@[[:word:]]+)?)}i\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations inside %r{{}} regex, got: {:?}", diags);
+}

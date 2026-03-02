@@ -21,3 +21,11 @@ fn no_violation_for_bang_operator() {
     let diags = NotKeyword.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+#[test]
+fn no_violation_for_where_not_method_call() {
+    let src = "scope :remote, -> { where.not(domain: nil) }\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NotKeyword.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for where.not(), got: {:?}", diags);
+}

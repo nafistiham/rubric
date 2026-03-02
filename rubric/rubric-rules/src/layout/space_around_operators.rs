@@ -21,6 +21,32 @@ impl Rule for SpaceAroundOperators {
             while j < len {
                 let b = bytes[j];
 
+                // ── Skip %r{...} percent-regex literals ──────────────────────
+                if j + 1 < len && b == b'%' && bytes[j+1] == b'r' {
+                    j += 2;
+                    if j < len {
+                        let delim = bytes[j];
+                        j += 1;
+                        if delim == b'{' {
+                            let mut depth = 1usize;
+                            while j < len && depth > 0 {
+                                match bytes[j] {
+                                    b'\\' => { j += 2; }
+                                    b'{' => { depth += 1; j += 1; }
+                                    b'}' => { depth -= 1; j += 1; }
+                                    _ => { j += 1; }
+                                }
+                            }
+                        } else {
+                            while j < len && bytes[j] != delim {
+                                if bytes[j] == b'\\' { j += 2; } else { j += 1; }
+                            }
+                            if j < len { j += 1; }
+                        }
+                    }
+                    continue;
+                }
+
                 // ── Regex state: skip until unescaped `/` ────────────────────
                 if in_regex {
                     match b {
@@ -142,6 +168,17 @@ impl Rule for SpaceAroundOperators {
                         // Skip => (hash rocket)
                         let next = if j + 1 < len { bytes[j+1] } else { 0 };
                         if next == b'>' {
+                            j += 1;
+                            continue;
+                        }
+                        // Skip =~ (regex match operator)
+                        if next == b'~' {
+                            j += 1;
+                            continue;
+                        }
+                        // Skip setter method definitions: def foo=(val)
+                        // The `=` is part of the method name when followed by `(`
+                        if next == b'(' {
                             j += 1;
                             continue;
                         }
