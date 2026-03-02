@@ -21,3 +21,11 @@ fn no_violation_without_space_inside_parens() {
     let diags = SpaceInsideParens.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_multiline_paren_close() {
+    let src = "result = foo(\n  x,\n  y\n  )\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideParens.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for multiline paren close, got: {:?}", diags);
+}

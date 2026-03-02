@@ -56,13 +56,16 @@ impl Rule for SpaceInsideReferenceBrackets {
                 if b == b']' && pos > 0 {
                     let prev = bytes[pos - 1];
                     if prev == b' ' {
-                        let flag_pos = (line_start + pos - 1) as u32;
-                        diags.push(Diagnostic {
-                            rule: self.name(),
-                            message: "Space detected inside reference brackets.".into(),
-                            range: TextRange::new(flag_pos, flag_pos + 1),
-                            severity: Severity::Warning,
-                        });
+                        // Skip if `]` is the first non-space character (indented multiline close)
+                        if bytes[..pos].iter().any(|&b| b != b' ') {
+                            let flag_pos = (line_start + pos - 1) as u32;
+                            diags.push(Diagnostic {
+                                rule: self.name(),
+                                message: "Space detected inside reference brackets.".into(),
+                                range: TextRange::new(flag_pos, flag_pos + 1),
+                                severity: Severity::Warning,
+                            });
+                        }
                     }
                 }
 

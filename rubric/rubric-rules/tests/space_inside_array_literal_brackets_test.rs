@@ -21,3 +21,11 @@ fn no_violation_without_space_inside_array_literal_brackets() {
     let diags = SpaceInsideArrayLiteralBrackets.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_multiline_array_close() {
+    let src = "result = foo([\n  Foo.bar,\n  ])\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideArrayLiteralBrackets.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for multiline array close, got: {:?}", diags);
+}

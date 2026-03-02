@@ -46,13 +46,16 @@ impl Rule for SpaceInsideArrayLiteralBrackets {
                 // Detect ` ]` — space before close bracket
                 if b == b']' {
                     if j > 0 && bytes[j-1] == b' ' {
-                        let pos = (line_start + j - 1) as u32;
-                        diags.push(Diagnostic {
-                            rule: self.name(),
-                            message: "Space before `]` detected.".into(),
-                            range: TextRange::new(pos, pos + 1),
-                            severity: Severity::Warning,
-                        });
+                        // Skip if `]` is the first non-space character (indented multiline close)
+                        if bytes[..j].iter().any(|&b| b != b' ') {
+                            let pos = (line_start + j - 1) as u32;
+                            diags.push(Diagnostic {
+                                rule: self.name(),
+                                message: "Space before `]` detected.".into(),
+                                range: TextRange::new(pos, pos + 1),
+                                severity: Severity::Warning,
+                            });
+                        }
                     }
                 }
 
