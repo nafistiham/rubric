@@ -22,12 +22,16 @@ impl Rule for MultilineMethodCallBraceLayout {
                 let mut is_multiline = false;
                 while j > 0 {
                     j -= 1;
-                    let prev = lines[j].trim();
-                    if prev.contains('(') {
+                    let prev = lines[j].trim_end();
+                    // Only treat as multiline-new-line style when the opening `(`
+                    // is the last meaningful character on its line (bare paren).
+                    // `foo(arg1,\n    arg2)` is valid symmetrical style — the `(`
+                    // has content after it so it doesn't count here.
+                    if prev.ends_with('(') {
                         is_multiline = true;
                         break;
                     }
-                    if prev.is_empty() { break; }
+                    if prev.trim().is_empty() { break; }
                 }
 
                 if is_multiline {
