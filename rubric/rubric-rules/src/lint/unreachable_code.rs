@@ -34,6 +34,12 @@ impl Rule for UnreachableCode {
                 )
             });
 
+            // Guard clauses: "return if condition" / "return unless condition" — code after IS reachable
+            if is_terminator && (trimmed.contains(" if ") || trimmed.contains(" unless ")) {
+                i += 1;
+                continue;
+            }
+
             if is_terminator && i + 1 < n {
                 // Look at next non-blank line at same indentation
                 let mut j = i + 1;
