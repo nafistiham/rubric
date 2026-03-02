@@ -40,7 +40,7 @@ Rubocop is the standard. It's also slow — seconds on small projects, minutes o
 
 ```ruby
 # Gemfile
-gem 'rubric', require: false
+gem 'rubric-linter', require: false
 ```
 
 ```sh
@@ -51,7 +51,7 @@ bundle exec rubric check
 ### Standalone
 
 ```sh
-gem install rubric
+gem install rubric-linter
 ```
 
 No Rust toolchain required. The gem ships a precompiled binary for your platform.
