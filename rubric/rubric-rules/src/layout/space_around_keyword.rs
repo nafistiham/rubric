@@ -31,8 +31,8 @@ impl Rule for SpaceAroundKeyword {
                 while j + kw_len <= len {
                     // Check if this position has the keyword
                     if &bytes[j..j + kw_len] == kw_bytes {
-                        // Check word boundary before
-                        let before_ok = j == 0 || !bytes[j - 1].is_ascii_alphanumeric() && bytes[j - 1] != b'_';
+                        // Check word boundary before (also exclude `.` — method calls like `.not(` should not fire)
+                        let before_ok = j == 0 || (!bytes[j - 1].is_ascii_alphanumeric() && bytes[j - 1] != b'_' && bytes[j - 1] != b'.');
                         // Check what comes after the keyword
                         let after_pos = j + kw_len;
                         if before_ok && after_pos < len && bytes[after_pos] == b'(' {

@@ -12,10 +12,9 @@ impl Rule for BlockAlignment {
         let lines = &ctx.lines;
         let n = lines.len();
 
-        // Track `do` block openings with their indentation
-        let mut block_stack: Vec<usize> = Vec::new(); // indent levels of `do` lines
-        // Track inner construct depth so `end` for if/def/class/etc. doesn't pop block stack
-        let mut inner_depth = 0usize;
+        // Unified stack: (indent, is_do_block)
+        // true = do-block (alignment checked), false = inner construct (alignment not checked)
+        let mut stack: Vec<(usize, bool)> = Vec::new();
 
         for i in 0..n {
             let line = &lines[i];
@@ -28,37 +27,38 @@ impl Rule for BlockAlignment {
 
             let t = trimmed.trim();
 
-            let opens_block = t.ends_with(" do")
+            let opens_do_block = t.ends_with(" do")
                 || t.ends_with(" do |")
                 || t.contains(" do |")
                 || t.contains(" do|")
                 || t == "do";
 
-            let opens_inner = !opens_block && (
+            let opens_inner_construct = !opens_do_block && (
                 t.starts_with("def ")
-                    || t == "def"
-                    || t.starts_with("if ")
-                    || t.starts_with("unless ")
-                    || t.starts_with("while ")
-                    || t.starts_with("until ")
-                    || t == "begin"
-                    || t.starts_with("begin ")
-                    || t.starts_with("case ")
-                    || t.starts_with("class ")
-                    || t.starts_with("module ")
+                || t == "def"
+                || t.starts_with("if ")
+                || t.starts_with("unless ")
+                || t.starts_with("while ")
+                || t.starts_with("until ")
+                || t == "begin"
+                || t.starts_with("begin ")
+                || t.starts_with("case ")
+                || t.starts_with("class ")
+                || t.starts_with("module ")
             );
 
-            if opens_block {
-                block_stack.push(indent);
-            } else if opens_inner && !block_stack.is_empty() {
-                inner_depth += 1;
+            if opens_do_block {
+                stack.push((indent, true));
+            } else if opens_inner_construct {
+                // Only track if we're inside a do-block (stack not empty)
+                if !stack.is_empty() {
+                    stack.push((indent, false));
+                }
             }
 
-            if t == "end" {
-                if inner_depth > 0 {
-                    inner_depth -= 1;
-                } else if let Some(expected_indent) = block_stack.pop() {
-                    if indent != expected_indent {
+            if t == "end" || t.starts_with("end ") || t.starts_with("end.") {
+                if let Some((expected_indent, is_do)) = stack.pop() {
+                    if is_do && indent != expected_indent {
                         let line_start = ctx.line_start_offsets[i] as usize;
                         let pos = (line_start + indent) as u32;
                         diags.push(Diagnostic {
@@ -71,6 +71,7 @@ impl Rule for BlockAlignment {
                             severity: Severity::Warning,
                         });
                     }
+                    // If not is_do (inner construct), just pop silently — no alignment check
                 }
             }
         }

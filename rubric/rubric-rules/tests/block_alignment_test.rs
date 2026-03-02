@@ -19,3 +19,45 @@ fn no_violation_on_clean() {
     let diags = BlockAlignment.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations on clean code");
 }
+
+#[test]
+fn no_false_positive_for_do_block_inside_case() {
+    // do-block nested inside case (non-do inner construct)
+    let src = concat!(
+        "foo.each do\n",
+        "  case x\n",
+        "  when :a\n",
+        "    [1,2].each do |i|\n",
+        "      puts i\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = BlockAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no FP for do-block inside case, got: {:?}", diags);
+}
+
+#[test]
+fn no_false_positive_for_do_block_inside_if() {
+    let src = concat!(
+        "foo.each do\n",
+        "  if cond\n",
+        "    bar.each do |x|\n",
+        "      puts x\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = BlockAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no FP for do-block inside if, got: {:?}", diags);
+}
+
+#[test]
+fn still_detects_misaligned_block_end() {
+    let src = "foo.each do\n  bar\n    end\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = BlockAlignment.check_source(&ctx);
+    assert!(!diags.is_empty(), "expected violation for misaligned block end, got none");
+}
