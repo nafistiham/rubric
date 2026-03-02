@@ -44,6 +44,23 @@ impl Rule for ExtraSpacing {
                         j += 1;
                     }
                     let span_end = j;
+
+                    // Skip trailing whitespace — all bytes from span_start to end of
+                    // content are spaces, meaning these spaces run to EOL. TrailingWhitespace
+                    // handles that case; ExtraSpacing must not double-report it.
+                    let rest_all_spaces = bytes[span_end..].iter().all(|&b| b == b' ');
+                    if rest_all_spaces {
+                        j = span_end;
+                        continue;
+                    }
+
+                    // Skip alignment spacing after comma — e.g. `[10..10,   0..255]`.
+                    // Extra spaces immediately following a `,` are valid Ruby column-alignment style.
+                    if span_start > 0 && bytes[span_start - 1] == b',' {
+                        j = span_end;
+                        continue;
+                    }
+
                     let line_start = ctx.line_start_offsets[i] as usize;
                     let abs_start = (line_start + indent_len + span_start) as u32;
                     let abs_end = (line_start + indent_len + span_end) as u32;
