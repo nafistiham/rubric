@@ -48,3 +48,40 @@ fn still_detects_odd_block_indentation() {
     let diags = IndentationWidth.check_source(&ctx);
     assert!(!diags.is_empty(), "3-space indent should still be flagged");
 }
+
+// ── Inline if continuation alignment must NOT fire ─────────────────────────
+// `x = if cond\n       value\n     end` — the `value` and `end` are aligned
+// to the `if` keyword, resulting in odd-numbered indents.
+#[test]
+fn no_false_positive_for_inline_if_continuation() {
+    let src = concat!(
+        "def email(name: nil, domain: nil)\n",
+        "  local_part = if domain\n",
+        "                 foo(name: name, domain: domain)\n",
+        "               else\n",
+        "                 foo(name: name)\n",
+        "               end\n",
+        "  local_part\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(diags.is_empty(), "inline if alignment should not be flagged: {:?}", diags);
+}
+
+#[test]
+fn no_false_positive_for_inline_unless_continuation() {
+    let src = concat!(
+        "def foo\n",
+        "  result = unless condition\n",
+        "             value_a\n",
+        "           else\n",
+        "             value_b\n",
+        "           end\n",
+        "  result\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(diags.is_empty(), "inline unless alignment should not be flagged: {:?}", diags);
+}
