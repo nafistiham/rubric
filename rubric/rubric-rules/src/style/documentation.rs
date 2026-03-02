@@ -17,6 +17,12 @@ impl Rule for Documentation {
                 continue;
             }
 
+            // Only flag top-level class/module (indent 0); skip inner/nested definitions
+            let indent = line.len() - trimmed.len();
+            if indent > 0 {
+                continue;
+            }
+
             // Look backwards (ignoring blank lines) for a comment line
             let mut has_doc = false;
             if i > 0 {
@@ -36,9 +42,8 @@ impl Rule for Documentation {
             }
 
             if !has_doc {
-                let indent = line.len() - trimmed.len();
                 let line_start = ctx.line_start_offsets[i] as usize;
-                let pos = (line_start + indent) as u32;
+                let pos = line_start as u32;
                 diags.push(Diagnostic {
                     rule: self.name(),
                     message: "Missing documentation comment for class/module.".into(),
