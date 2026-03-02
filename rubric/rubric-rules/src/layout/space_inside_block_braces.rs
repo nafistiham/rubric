@@ -22,6 +22,9 @@ impl Rule for SpaceInsideBlockBraces {
 
             let mut pos = 0;
             let mut in_string: Option<u8> = None;
+            // Stack recording whether each open `{` is a block (true) or hash (false).
+            // Used to give the `}` check the same context as the `{` check.
+            let mut brace_kind_stack: Vec<bool> = Vec::new();
 
             while pos < n {
                 let b = bytes[pos];
@@ -34,13 +37,12 @@ impl Rule for SpaceInsideBlockBraces {
                     None => {}
                 }
 
-                // Detect `{` in block context (after method call) not followed by space
                 if b == b'{' {
-                    // Check what's after `{`
                     let next = if pos + 1 < n { bytes[pos + 1] } else { 0 };
-                    // Determine if `{` is a block or a hash literal.
-                    // A hash literal follows `=`, `,`, `(`, `[`, `{`, or appears at
-                    // the start of a trimmed line. Skip those.
+
+                    // Determine if `{` opens a hash literal or a block.
+                    // Hash contexts: `{` follows =, ,, (, [, {, :, or is the first
+                    // non-whitespace character on the line.
                     let prev_nonspace = {
                         let mut p = pos;
                         let mut found = 0u8;
@@ -53,13 +55,14 @@ impl Rule for SpaceInsideBlockBraces {
                         }
                         found
                     };
-                    let is_hash_context = matches!(
+                    let is_hash = matches!(
                         prev_nonspace,
-                        b'=' | b',' | b'(' | b'[' | b'{' | 0
+                        b'=' | b',' | b'(' | b'[' | b'{' | b':' | 0
                     ) || pos == line.len() - line.trim_start().len();
 
-                    if !is_hash_context && next != b' ' && next != b'\n' && next != b'}' {
-                        // Missing space after `{`
+                    brace_kind_stack.push(!is_hash); // true = block
+
+                    if !is_hash && next != b' ' && next != b'\n' && next != b'}' {
                         let flag_pos = (line_start + pos) as u32;
                         diags.push(Diagnostic {
                             rule: self.name(),
@@ -70,16 +73,20 @@ impl Rule for SpaceInsideBlockBraces {
                     }
                 }
 
-                if b == b'}' && pos > 0 {
-                    let prev = bytes[pos - 1];
-                    if prev != b' ' && prev != b'\n' && prev != b'{' {
-                        let flag_pos = (line_start + pos) as u32;
-                        diags.push(Diagnostic {
-                            rule: self.name(),
-                            message: "Space missing inside block braces before `}`.".into(),
-                            range: TextRange::new(flag_pos, flag_pos + 1),
-                            severity: Severity::Warning,
-                        });
+                if b == b'}' {
+                    // Only fire if this `}` closes a block brace (not a hash).
+                    let is_block = brace_kind_stack.pop().unwrap_or(false);
+                    if is_block && pos > 0 {
+                        let prev = bytes[pos - 1];
+                        if prev != b' ' && prev != b'\n' && prev != b'{' {
+                            let flag_pos = (line_start + pos) as u32;
+                            diags.push(Diagnostic {
+                                rule: self.name(),
+                                message: "Space missing inside block braces before `}`.".into(),
+                                range: TextRange::new(flag_pos, flag_pos + 1),
+                                severity: Severity::Warning,
+                            });
+                        }
                     }
                 }
 
