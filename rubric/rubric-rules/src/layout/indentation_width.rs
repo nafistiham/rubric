@@ -9,6 +9,7 @@ impl Rule for IndentationWidth {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        let mut prev_nonempty_line: &str = ""; // track previous non-empty line to detect continuations
         for (i, line) in ctx.lines.iter().enumerate() {
             if line.is_empty() {
                 continue;
@@ -21,18 +22,25 @@ impl Rule for IndentationWidth {
                     range: TextRange::new(start, start + 1),
                     severity: Severity::Warning,
                 });
+                prev_nonempty_line = line;
                 continue;
             }
             let spaces = line.len() - line.trim_start_matches(' ').len();
             if spaces > 0 && spaces % 2 != 0 {
-                let start = ctx.line_start_offsets[i];
-                diags.push(Diagnostic {
-                    rule: self.name(),
-                    message: format!("Indentation width must be a multiple of 2 (got {spaces})."),
-                    range: TextRange::new(start, start + spaces as u32),
-                    severity: Severity::Warning,
-                });
+                // Skip continuation lines — a trailing comma on the previous non-empty
+                // line means this line is an aligned argument continuation, not a new
+                // block scope indent.
+                if !prev_nonempty_line.trim_end().ends_with(',') {
+                    let start = ctx.line_start_offsets[i];
+                    diags.push(Diagnostic {
+                        rule: self.name(),
+                        message: format!("Indentation width must be a multiple of 2 (got {spaces})."),
+                        range: TextRange::new(start, start + spaces as u32),
+                        severity: Severity::Warning,
+                    });
+                }
             }
+            prev_nonempty_line = line;
         }
         diags
     }
