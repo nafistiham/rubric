@@ -27,6 +27,18 @@ impl Rule for BlockDelimiters {
                 // Only flag if there's a method call before the `{`
                 // (i.e., line doesn't just start with `{`)
                 if !before_brace.is_empty() {
+                    // Skip if `{` is in a hash-literal context.
+                    // Hash context: last non-space char before `{` is `=`, `:`, `,`, `(`, `[`, or `{`.
+                    let last_char = before_brace.trim_end().chars().last();
+                    let is_hash_context = matches!(
+                        last_char,
+                        Some('=') | Some(':') | Some(',') | Some('(') | Some('[') | Some('{')
+                    );
+                    if is_hash_context {
+                        i += 1;
+                        continue;
+                    }
+
                     // Now check if the matching `}` is on a different line
                     let mut depth = 1i32;
                     let mut j = i + 1;
