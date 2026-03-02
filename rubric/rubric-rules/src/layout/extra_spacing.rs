@@ -2,6 +2,20 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct ExtraSpacing;
 
+/// Returns true if `line` has a bare `=` at byte column `col`
+/// (excluding compound operators `!=`, `<=`, `>=`, `==`, `=>`).
+fn has_eq_at_col(line: &str, col: usize) -> bool {
+    let bytes = line.as_bytes();
+    if col >= bytes.len() || bytes[col] != b'=' {
+        return false;
+    }
+    let prev = if col > 0 { bytes[col - 1] } else { 0 };
+    let next = if col + 1 < bytes.len() { bytes[col + 1] } else { 0 };
+    // Exclude compound operators: !=, <=, >=, ==, =>
+    prev != b'!' && prev != b'<' && prev != b'>' && prev != b'='
+        && next != b'=' && next != b'>'
+}
+
 impl Rule for ExtraSpacing {
     fn name(&self) -> &'static str {
         "Layout/ExtraSpacing"
@@ -59,6 +73,29 @@ impl Rule for ExtraSpacing {
                     if span_start > 0 && bytes[span_start - 1] == b',' {
                         j = span_end;
                         continue;
+                    }
+
+                    // Skip extra spaces immediately before a `#` comment (comment-alignment).
+                    if span_end < len && bytes[span_end] == b'#' {
+                        j = span_end;
+                        continue;
+                    }
+
+                    // Skip column-aligned `=` (e.g., vertically-aligned assignments).
+                    if span_end < len && bytes[span_end] == b'=' {
+                        let after_eq = if span_end + 1 < len { bytes[span_end + 1] } else { 0 };
+                        // Only treat as alignment `=`, not compound operators `==`, `=>`
+                        if after_eq != b'=' && after_eq != b'>' {
+                            let eq_col = indent_len + span_end;
+                            let is_aligned = (i > 0 && has_eq_at_col(&lines[i - 1], eq_col))
+                                || (i + 1 < lines.len() && has_eq_at_col(&lines[i + 1], eq_col))
+                                || (i > 1 && has_eq_at_col(&lines[i - 2], eq_col))
+                                || (i + 2 < lines.len() && has_eq_at_col(&lines[i + 2], eq_col));
+                            if is_aligned {
+                                j = span_end;
+                                continue;
+                            }
+                        }
                     }
 
                     let line_start = ctx.line_start_offsets[i] as usize;

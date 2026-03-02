@@ -50,3 +50,21 @@ fn still_detects_double_space_in_assignment() {
     let diags = ExtraSpacing.check_source(&ctx);
     assert!(!diags.is_empty(), "double space before = should still be flagged");
 }
+
+// ── Extra spaces before `#` comment (comment-alignment) must NOT fire ─────
+#[test]
+fn no_false_positive_for_spaces_before_comment() {
+    let src = "x = /regex/      # comment\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ExtraSpacing.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for comment-alignment, got: {:?}", diags);
+}
+
+// ── Column-aligned `=` in consecutive assignments must NOT fire ────────────
+#[test]
+fn no_false_positive_for_column_aligned_assignments() {
+    let src = "@query     = foo\n@account   = bar\n@options   = baz\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ExtraSpacing.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for column-aligned =, got: {:?}", diags);
+}
