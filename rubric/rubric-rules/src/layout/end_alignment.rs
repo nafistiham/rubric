@@ -43,6 +43,7 @@ impl Rule for EndAlignment {
             // Pattern: something = if condition  (or unless/case)
             let is_inline_opener = !is_block_opener && (
                 (trimmed.contains(" = if ") || trimmed.contains(" = unless ") || trimmed.contains(" = case "))
+                || (trimmed.contains(" << if ") || trimmed.contains(" << unless ") || trimmed.contains(" << case "))
                 || (trimmed.contains("(if ") || trimmed.contains("(unless ") || trimmed.contains("(case "))
             );
 

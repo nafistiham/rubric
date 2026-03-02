@@ -50,6 +50,9 @@ impl Rule for DefEndAlignment {
                 t.contains(" = if ") || t.ends_with(" = if")
                 || t.contains(" = unless ") || t.ends_with(" = unless")
                 || t.contains(" = case ") || t.ends_with(" = case")
+                || t.contains(" << if ") || t.ends_with(" << if")
+                || t.contains(" << unless ") || t.ends_with(" << unless")
+                || t.contains(" << case ") || t.ends_with(" << case")
             );
 
             if is_def_opener {

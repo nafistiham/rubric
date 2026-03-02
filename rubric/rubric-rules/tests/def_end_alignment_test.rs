@@ -84,3 +84,11 @@ fn no_violation_for_multiple_inline_ifs_inside_def() {
     let diags = DefEndAlignment.check_source(&ctx);
     assert!(diags.is_empty(), "expected no FP for multiple inline ifs, got: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_shovel_if_inside_def() {
+    let src = "def foo\n  arr << if cond\n             val1\n           else\n             val2\n           end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for << if inside def, got: {:?}", diags);
+}

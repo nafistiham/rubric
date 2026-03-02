@@ -61,3 +61,11 @@ fn still_detects_misaligned_block_end() {
     let diags = BlockAlignment.check_source(&ctx);
     assert!(!diags.is_empty(), "expected violation for misaligned block end, got none");
 }
+
+#[test]
+fn no_false_positive_for_shovel_if_inline_conditional() {
+    let src = "items.each do |x|\n  arr << if x.even?\n             x * 2\n           else\n             x\n           end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = BlockAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for << if inline conditional, got: {:?}", diags);
+}

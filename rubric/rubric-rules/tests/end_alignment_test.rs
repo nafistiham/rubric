@@ -45,3 +45,11 @@ fn still_detects_misaligned_end_after_def() {
     let diags = EndAlignment.check_source(&ctx);
     assert!(!diags.is_empty(), "expected violation for misaligned end, got none");
 }
+
+#[test]
+fn no_false_positive_for_shovel_if_inline_conditional() {
+    let src = "def foo\n  arr << if cond\n             val1\n           else\n             val2\n           end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for << if inline conditional, got: {:?}", diags);
+}

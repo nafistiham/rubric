@@ -47,9 +47,14 @@ impl Rule for BlockAlignment {
                 || t.starts_with("module ")
             );
 
+            let has_inline_conditional = !opens_do_block && !opens_inner_construct && (
+                t.contains(" << if ") || t.contains(" << unless ") || t.contains(" << case ")
+                || t.contains(" = if ") || t.contains(" = unless ") || t.contains(" = case ")
+            );
+
             if opens_do_block {
                 stack.push((indent, true));
-            } else if opens_inner_construct {
+            } else if opens_inner_construct || has_inline_conditional {
                 // Only track if we're inside a do-block (stack not empty)
                 if !stack.is_empty() {
                     stack.push((indent, false));

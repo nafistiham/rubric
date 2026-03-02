@@ -85,3 +85,11 @@ fn no_false_positive_for_inline_unless_continuation() {
     let diags = IndentationWidth.check_source(&ctx);
     assert!(diags.is_empty(), "inline unless alignment should not be flagged: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_shovel_if_continuation() {
+    let src = "arr << if condition\n           val1\n         else\n           val2\n         end\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for << if continuation, got: {:?}", diags);
+}

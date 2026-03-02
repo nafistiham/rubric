@@ -31,7 +31,9 @@ impl Rule for IndentationWidth {
             }
 
             // Update inline conditional depth tracking
-            if line.contains(" = if ") || line.contains(" = unless ") || line.contains(" = case ") {
+            if line.contains(" = if ") || line.contains(" = unless ") || line.contains(" = case ")
+                || line.contains(" << if ") || line.contains(" << unless ") || line.contains(" << case ")
+            {
                 inline_cond_depth += 1;
             }
 
