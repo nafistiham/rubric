@@ -23,6 +23,14 @@ impl Rule for EmptyBlock {
             let len = bytes.len();
             let mut j = 0;
 
+            // Ruby keywords that can appear immediately before `{` but mean the `{}`
+            // is an empty hash literal (return value, default, etc.), not an empty block.
+            const HASH_KEYWORDS: &[&[u8]] = &[
+                b"return", b"rescue", b"yield", b"raise", b"break", b"next",
+                b"then", b"else", b"elsif", b"when", b"do", b"begin",
+                b"if", b"unless", b"while", b"until", b"in", b"and", b"or", b"not",
+            ];
+
             while j < len {
                 if bytes[j] == b'{' {
                     let open_pos = j;
@@ -31,13 +39,45 @@ impl Rule for EmptyBlock {
                     while j < len && bytes[j] == b' ' { j += 1; }
                     // Check if we hit `}`
                     if j < len && bytes[j] == b'}' {
-                        let line_start = ctx.line_start_offsets[i] as usize;
-                        diags.push(Diagnostic {
-                            rule: self.name(),
-                            message: "Empty block detected.".into(),
-                            range: TextRange::new((line_start + open_pos) as u32, (line_start + j + 1) as u32),
-                            severity: Severity::Warning,
-                        });
+                        // Before flagging, determine if `{` is a block or a hash literal.
+                        // Scan backward from open_pos to find the preceding non-space char.
+                        let mut k = open_pos as isize - 1;
+                        while k >= 0 && bytes[k as usize] == b' ' { k -= 1; }
+
+                        let is_block = if k < 0 {
+                            // `{}` at start of line → hash literal
+                            false
+                        } else {
+                            let prev = bytes[k as usize];
+                            if prev == b')' || prev == b']' {
+                                // After explicit args `foo(x) {}` or `arr[] {}` → block
+                                true
+                            } else if prev.is_ascii_alphanumeric() || prev == b'_' || prev == b'?' {
+                                // Word char: extract word and check if it's a keyword
+                                let word_end = k as usize;
+                                let mut word_start = word_end;
+                                while word_start > 0
+                                    && (bytes[word_start - 1].is_ascii_alphanumeric() || bytes[word_start - 1] == b'_')
+                                {
+                                    word_start -= 1;
+                                }
+                                let word = &bytes[word_start..=word_end];
+                                !HASH_KEYWORDS.contains(&word)
+                            } else {
+                                // Preceded by operator/punctuation (`=`, `|`, `(`, `,`, etc.) → hash
+                                false
+                            }
+                        };
+
+                        if is_block {
+                            let line_start = ctx.line_start_offsets[i] as usize;
+                            diags.push(Diagnostic {
+                                rule: self.name(),
+                                message: "Empty block detected.".into(),
+                                range: TextRange::new((line_start + open_pos) as u32, (line_start + j + 1) as u32),
+                                severity: Severity::Warning,
+                            });
+                        }
                     }
                     continue;
                 }
