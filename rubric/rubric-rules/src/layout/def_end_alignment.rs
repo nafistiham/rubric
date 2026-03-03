@@ -2,6 +2,39 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct DefEndAlignment;
 
+/// Returns true if `trimmed` is an endless method (`def foo = expr` / `def foo(x) = expr`).
+fn is_endless_method(trimmed: &str) -> bool {
+    let def_pos = match trimmed.find("def ") {
+        Some(p) if p <= 20 => p,
+        _ => return false,
+    };
+    let after_def = &trimmed[def_pos + 4..];
+    let bytes = after_def.as_bytes();
+    let n = bytes.len();
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < n {
+        match bytes[i] {
+            b'(' => { depth += 1; }
+            b')' => { depth -= 1; }
+            b' ' if depth == 0 && i + 2 < n
+                && bytes[i + 1] == b'='
+                && bytes[i + 2] != b'='
+                && bytes[i + 2] != b'>' => {
+                return true;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Returns true if `trimmed` is a one-liner like `class Foo; end`.
+fn is_one_liner(trimmed: &str) -> bool {
+    trimmed.trim_end_matches(|c: char| c == ' ' || c == '\t').ends_with("; end")
+}
+
 impl Rule for DefEndAlignment {
     fn name(&self) -> &'static str {
         "Layout/DefEndAlignment"
@@ -27,10 +60,14 @@ impl Rule for DefEndAlignment {
 
             let t = trimmed.trim();
 
-            let is_def_opener = t.starts_with("def ") || t == "def"
-                || t.starts_with("class ") || t.starts_with("module ");
+            // Exclude one-liners and endless methods from all stack tracking.
+            let is_def_opener = !is_one_liner(t) && !is_endless_method(t) && (
+                t.starts_with("def ") || t == "def"
+                || t.starts_with("private def ") || t.starts_with("protected def ")
+                || t.starts_with("class ") || t.starts_with("module ")
+            );
 
-            let is_inner_construct = !is_def_opener && (
+            let is_inner_construct = !is_def_opener && !is_one_liner(t) && (
                 t.starts_with("if ")
                 || t.starts_with("unless ")
                 || t.starts_with("while ")

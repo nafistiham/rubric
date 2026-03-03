@@ -97,6 +97,93 @@ fn no_false_positive_for_inline_or_begin_with_nested_if() {
     assert!(diags.is_empty(), "|| begin with nested if falsely flagged: {:?}", diags);
 }
 
+// ── False positive: endless method `def foo = expr` (no `end` needed) ────────
+#[test]
+fn no_false_positive_for_endless_method() {
+    let src = concat!(
+        "module Foo\n",
+        "  class Bar\n",
+        "    def name = \"bar\"\n",
+        "    def count = 42\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "endless methods falsely flagged: {:?}", diags);
+}
+
+// ── False positive: endless method with params `def foo(x) = expr` ────────────
+#[test]
+fn no_false_positive_for_endless_method_with_params() {
+    let src = concat!(
+        "module Router\n",
+        "  def head(path, &) = route(:head, path, &)\n",
+        "  def get(path, &) = route(:get, path, &)\n",
+        "  def post(path, &) = route(:post, path, &)\n",
+        "  def route(*methods, path, &block)\n",
+        "    methods.each { |m| routes[m] << block }\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "endless methods with params falsely flagged: {:?}", diags);
+}
+
+// ── False positive: one-liner class `class Foo; end` ─────────────────────────
+#[test]
+fn no_false_positive_for_one_liner_class() {
+    let src = concat!(
+        "module Sidekiq\n",
+        "  class JobRetry\n",
+        "    class Handled < ::RuntimeError; end\n",
+        "    class Skip < Handled; end\n",
+        "    def initialize(capsule)\n",
+        "      @capsule = capsule\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "one-liner class falsely flagged: {:?}", diags);
+}
+
+// ── False positive: `private def` should align like a normal `def` ───────────
+#[test]
+fn no_false_positive_for_private_def() {
+    let src = concat!(
+        "class Config\n",
+        "  def public_method\n",
+        "    1\n",
+        "  end\n",
+        "\n",
+        "  private def parameter_size(handler)\n",
+        "    handler.parameters.size\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "private def falsely flagged: {:?}", diags);
+}
+
+// ── False positive: `protected def` should align like a normal `def` ─────────
+#[test]
+fn no_false_positive_for_protected_def() {
+    let src = concat!(
+        "class Foo\n",
+        "  protected def bar\n",
+        "    42\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "protected def falsely flagged: {:?}", diags);
+}
+
 // ── False positive: inline `if` + nested inline `begin` assignment ────────────
 // Pattern: val = if cond / job = begin ... rescue ... end / ... / else / end
 #[test]
