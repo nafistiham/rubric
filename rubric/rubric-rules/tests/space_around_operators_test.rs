@@ -269,3 +269,49 @@ fn no_false_positive_for_backtick_string() {
     let diags = SpaceAroundOperators.check_source(&ctx);
     assert!(diags.is_empty(), "backtick string operators falsely flagged: {:?}", diags);
 }
+
+// ── False positive: =begin embedded doc delimiter ─────────────────────────────
+#[test]
+fn no_false_positive_for_equals_begin() {
+    let src = concat!(
+        "=begin\n",
+        "This is an embedded documentation block.\n",
+        "=end\n",
+        "x = 1\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "=begin falsely flagged: {:?}", diags);
+}
+
+// ── False positive: =end embedded doc delimiter ───────────────────────────────
+#[test]
+fn no_false_positive_for_equals_end() {
+    let src = "=end\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "=end falsely flagged: {:?}", diags);
+}
+
+// ── False positive: / inside %w[] multiline word array ───────────────────────
+#[test]
+fn no_false_positive_for_slash_in_percent_w_multiline() {
+    let src = concat!(
+        "TEST_FILES = %w[\n",
+        "  client_certs/ca.crt\n",
+        "  client_certs/client.crt\n",
+        "]\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "%w[] multiline slash falsely flagged: {:?}", diags);
+}
+
+// ── False positive: ?/ character literal ─────────────────────────────────────
+#[test]
+fn no_false_positive_for_question_slash_char_literal() {
+    let src = "unless location[0] == ?/\n  do_something\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "?/ char literal falsely flagged: {:?}", diags);
+}

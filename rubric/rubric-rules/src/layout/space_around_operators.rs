@@ -41,6 +41,10 @@ impl Rule for SpaceAroundOperators {
         let mut diags = Vec::new();
         // Cross-line heredoc tracking: Some(terminator) while inside a heredoc body.
         let mut in_heredoc: Option<String> = None;
+        // Cross-line percent-word-array tracking: true while inside %w[...], %W[...],
+        // %i[...], %I[...] that spans multiple lines. Lines inside are plain word tokens —
+        // no operator scanning applies.
+        let mut in_percent_word_array = false;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             // Skip lines that are inside a heredoc body (including the terminator line).
@@ -51,6 +55,20 @@ impl Rule for SpaceAroundOperators {
                 continue;
             }
 
+            // Skip =begin / =end embedded documentation delimiters.
+            // These always appear at column 0 and are NOT assignment operators.
+            let trimmed_line = line.trim_start();
+            if trimmed_line == "=begin" || trimmed_line.starts_with("=begin ")
+                || trimmed_line.starts_with("=begin\t")
+            {
+                continue;
+            }
+            if trimmed_line == "=end" || trimmed_line.starts_with("=end ")
+                || trimmed_line.starts_with("=end\t")
+            {
+                continue;
+            }
+
             let line_start = ctx.line_start_offsets[i] as usize;
             let bytes = line.as_bytes();
             let len = bytes.len();
@@ -58,9 +76,17 @@ impl Rule for SpaceAroundOperators {
             let mut in_string: Option<u8> = None;
             let mut in_regex = false;
             // Track if this line is a def header so we can skip = in param defaults
-            let trimmed_line = line.trim_start();
             let is_def_line = trimmed_line.starts_with("def ");
             let mut paren_depth: i32 = 0;
+
+            // If we are inside a multiline %w/%W/%i/%I array, scan for the closing `]`
+            // to end the context, then skip operator checking for this line.
+            if in_percent_word_array {
+                if line.contains(']') {
+                    in_percent_word_array = false;
+                }
+                continue;
+            }
 
             // Detect if this line opens a heredoc (body starts on the next line).
             if let Some(term) = detect_heredoc_terminator(line) {
@@ -109,6 +135,12 @@ impl Rule for SpaceAroundOperators {
                                         c if c == close => { depth -= 1; j += 1; }
                                         _ => { j += 1; }
                                     }
+                                }
+                                // If we reached end of line without closing, this is a
+                                // multiline %w/%W/%i/%I word array — mark state and skip.
+                                if depth > 0 && matches!(next_b, b'w' | b'W' | b'i' | b'I') {
+                                    in_percent_word_array = true;
+                                    break;
                                 }
                             }
                             continue;
@@ -296,6 +328,12 @@ impl Rule for SpaceAroundOperators {
                             || prev == b' ' || prev == b'\t' || prev == 0
                         {
                             in_regex = true;
+                            j += 1;
+                            continue;
+                        }
+                        // Skip `?/` — Ruby character literal for the `/` character.
+                        // The `?` immediately precedes the slash; there is no division here.
+                        if prev == b'?' {
                             j += 1;
                             continue;
                         }
