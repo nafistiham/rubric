@@ -39,6 +39,45 @@ impl Rule for BlockDelimiters {
                         continue;
                     }
 
+                    // Skip if this is a lambda body: `-> {` or `->(args) {`
+                    // Scan backward from brace_pos through the bytes of the line.
+                    let bytes = trimmed.as_bytes();
+                    let is_lambda = {
+                        // k points to last byte before `{` (we already stripped trailing ws via trimmed)
+                        let mut k = brace_pos as isize - 1;
+                        // skip spaces between `{` and what precedes it
+                        while k >= 0 && bytes[k as usize] == b' ' { k -= 1; }
+                        if k >= 0 && bytes[k as usize] == b')' {
+                            // Possibly `->(args) {` — find matching `(`
+                            let mut paren_depth = 1i32;
+                            let mut m = k - 1;
+                            while m >= 0 && paren_depth > 0 {
+                                let c = bytes[m as usize];
+                                if c == b')' { paren_depth += 1; }
+                                else if c == b'(' { paren_depth -= 1; }
+                                m -= 1;
+                            }
+                            // skip spaces before `(`
+                            while m >= 0 && bytes[m as usize] == b' ' { m -= 1; }
+                            // lambda if `->` immediately precedes the `(`
+                            m >= 1
+                                && bytes[m as usize] == b'>'
+                                && bytes[(m - 1) as usize] == b'-'
+                        } else if k >= 1
+                            && bytes[k as usize] == b'>'
+                            && bytes[(k - 1) as usize] == b'-'
+                        {
+                            // `-> {` — lambda with no args
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    if is_lambda {
+                        i += 1;
+                        continue;
+                    }
+
                     // Now check if the matching `}` is on a different line
                     let mut depth = 1i32;
                     let mut j = i + 1;

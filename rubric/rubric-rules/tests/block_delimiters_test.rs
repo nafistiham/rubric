@@ -50,3 +50,28 @@ fn still_detects_multiline_brace_block() {
     let diags = BlockDelimiters.check_source(&ctx);
     assert!(!diags.is_empty(), "multiline brace block should still be flagged");
 }
+
+// ── Lambda body must not be flagged — lambdas require {} ──────────────────
+#[test]
+fn no_false_positive_for_lambda_body() {
+    let src = "handler = -> {\n  puts 'hello'\n}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = BlockDelimiters.check_source(&ctx);
+    assert!(diags.is_empty(), "lambda body with -> should not be flagged: {:?}", diags);
+}
+
+#[test]
+fn no_false_positive_for_lambda_with_args() {
+    let src = "HANDLER = ->(cli) {\n  cli.stop\n  cli.cleanup\n}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = BlockDelimiters.check_source(&ctx);
+    assert!(diags.is_empty(), "lambda with args ->(x) should not be flagged: {:?}", diags);
+}
+
+#[test]
+fn no_false_positive_for_lambda_in_hash() {
+    let src = "HANDLERS = {\n  \"TERM\" => ->(cli) {\n    cli.logger.info \"Stopping\"\n    cli.launcher.quiet\n  },\n}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = BlockDelimiters.check_source(&ctx);
+    assert!(diags.is_empty(), "lambda in hash value should not be flagged: {:?}", diags);
+}
