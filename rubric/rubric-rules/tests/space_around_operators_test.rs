@@ -215,3 +215,57 @@ fn no_false_positive_for_operators_in_heredoc_body() {
     let diags = SpaceAroundOperators.check_source(&ctx);
     assert!(diags.is_empty(), "heredoc body operators falsely flagged: {:?}", diags);
 }
+
+// ── False positive: <=> spaceship operator ───────────────────────────────────
+#[test]
+fn no_false_positive_for_spaceship_operator() {
+    let src = "sorted = arr.sort { |a, b| b <=> a }\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "<=> spaceship falsely flagged: {:?}", diags);
+}
+
+// ── True positive: <=> without spaces should be detected ─────────────────────
+#[test]
+fn detects_spaceship_operator_without_spaces() {
+    let src = "sorted = arr.sort { |a, b| b<=>a }\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(!diags.is_empty(), "b<=>a should be flagged");
+}
+
+// ── False positive: operator symbols :<=, :>= ────────────────────────────────
+#[test]
+fn no_false_positive_for_operator_symbol() {
+    let src = "assert_operator 1000, :<=, result\nassert_operator a, :>=, b\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "operator symbol :<=/:>= falsely flagged: {:?}", diags);
+}
+
+// ── False positive: %w[...] word array with paths/dashes ─────────────────────
+#[test]
+fn no_false_positive_for_percent_w_literal() {
+    let src = "args = %w[sidekiq -r ./test/fake_env.rb]\nparts = %w[1-client-before 1-server-after]\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "%w[] operators falsely flagged: {:?}", diags);
+}
+
+// ── False positive: %(string) percent string literal ─────────────────────────
+#[test]
+fn no_false_positive_for_percent_paren_literal() {
+    let src = "html = %(<time class=\"ltr\" dir=\"ltr\">text</time>)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "%(string) operators falsely flagged: {:?}", diags);
+}
+
+// ── False positive: backtick shell string ────────────────────────────────────
+#[test]
+fn no_false_positive_for_backtick_string() {
+    let src = "label = `git log -1 --format=\"%h %s\"`.strip\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "backtick string operators falsely flagged: {:?}", diags);
+}

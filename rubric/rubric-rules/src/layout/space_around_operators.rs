@@ -71,30 +71,49 @@ impl Rule for SpaceAroundOperators {
             while j < len {
                 let b = bytes[j];
 
-                // ── Skip %r{...} percent-regex literals ──────────────────────
-                if j + 1 < len && b == b'%' && bytes[j+1] == b'r' {
-                    j += 2;
-                    if j < len {
-                        let delim = bytes[j];
-                        j += 1;
-                        if delim == b'{' {
-                            let mut depth = 1usize;
-                            while j < len && depth > 0 {
-                                match bytes[j] {
-                                    b'\\' => { j += 2; }
-                                    b'{' => { depth += 1; j += 1; }
-                                    b'}' => { depth -= 1; j += 1; }
-                                    _ => { j += 1; }
+                // ── Skip percent literals: %r{}, %w[], %i[], %(str), %q(), %Q() ──
+                // Also handles backtick strings as a special case below.
+                if b == b'%' && j + 1 < len {
+                    let next_b = bytes[j+1];
+                    // Determine delimiter: skip optional type char (r, w, W, i, I, q, Q, x)
+                    let (type_skip, delim_pos) = match next_b {
+                        b'r' | b'w' | b'W' | b'i' | b'I' | b'q' | b'Q' | b'x' => (true, j + 2),
+                        b'(' | b'[' | b'{' | b'|' | b'/' => (false, j + 1),
+                        _ => (false, usize::MAX), // not a percent literal
+                    };
+                    if delim_pos < len || (!type_skip && delim_pos == usize::MAX) {
+                        let delim_start = if type_skip { j + 2 } else { j + 1 };
+                        if delim_start < len {
+                            let open = bytes[delim_start];
+                            let close = match open {
+                                b'(' => b')',
+                                b'[' => b']',
+                                b'{' => b'}',
+                                b'<' => b'>',
+                                _ => open, // symmetric delimiter
+                            };
+                            j = delim_start + 1;
+                            if open == close {
+                                // Symmetric delimiter: scan until unescaped close
+                                while j < len && bytes[j] != close {
+                                    if bytes[j] == b'\\' { j += 2; } else { j += 1; }
+                                }
+                                if j < len { j += 1; }
+                            } else {
+                                // Bracket delimiter: track depth
+                                let mut depth = 1usize;
+                                while j < len && depth > 0 {
+                                    match bytes[j] {
+                                        b'\\' => { j += 2; }
+                                        c if c == open => { depth += 1; j += 1; }
+                                        c if c == close => { depth -= 1; j += 1; }
+                                        _ => { j += 1; }
+                                    }
                                 }
                             }
-                        } else {
-                            while j < len && bytes[j] != delim {
-                                if bytes[j] == b'\\' { j += 2; } else { j += 1; }
-                            }
-                            if j < len { j += 1; }
+                            continue;
                         }
                     }
-                    continue;
                 }
 
                 // ── Regex state: skip until unescaped `/` ────────────────────
@@ -113,15 +132,20 @@ impl Rule for SpaceAroundOperators {
                     Some(_) if b == b'\\' => { j += 2; continue; }
                     Some(delim) if b == delim => { in_string = None; j += 1; continue; }
                     Some(_) => { j += 1; continue; }
-                    None if b == b'"' || b == b'\'' => { in_string = Some(b); j += 1; continue; }
+                    None if b == b'"' || b == b'\'' || b == b'`' => { in_string = Some(b); j += 1; continue; }
                     None if b == b'#' => break, // inline comment — stop scanning
                     None => {}
                 }
 
-                // ── 3-char compound operators: ||=, &&=, === ─────────────────
+                // ── 3-char compound operators: ||=, &&=, ===, <=> ────────────
                 if j + 2 < len {
                     let three = &bytes[j..j+3];
-                    if three == b"||=" || three == b"&&=" || three == b"===" {
+                    if three == b"||=" || three == b"&&=" || three == b"===" || three == b"<=>" {
+                        // Skip if in symbol context: :<=>
+                        if j > 0 && bytes[j-1] == b':' {
+                            j += 3;
+                            continue;
+                        }
                         let prev_ok = j == 0 || bytes[j-1] == b' ' || bytes[j-1] == b'\t';
                         let next_ok = j + 3 >= len || bytes[j+3] == b' ' || bytes[j+3] == b'\t';
                         if !prev_ok || !next_ok {
@@ -176,6 +200,11 @@ impl Rule for SpaceAroundOperators {
                         || two == b"&&" || two == b"||" || two == b"+=" || two == b"-="
                         || two == b"*=" || two == b"/="
                     {
+                        // Skip operator symbols: :<=, :>=, :==, :!=, :&&, :||
+                        if j > 0 && bytes[j-1] == b':' {
+                            j += 2;
+                            continue;
+                        }
                         let prev_ok = j == 0 || bytes[j-1] == b' ' || bytes[j-1] == b'\t';
                         let next_ok = j + 2 >= len || bytes[j+2] == b' ' || bytes[j+2] == b'\t' || bytes[j+2] == b'\n';
                         if !prev_ok || !next_ok {
