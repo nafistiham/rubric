@@ -51,6 +51,17 @@ impl Rule for SpaceAfterColon {
                         j += 1;
                         continue;
                     }
+                    // Skip keyword argument shorthand and required keyword args:
+                    // `name:,` `cursor:)` `code:}` — no space needed after `:`.
+                    if next == b',' || next == b')' || next == b'}' {
+                        j += 1;
+                        continue;
+                    }
+                    // Skip URL scheme `://` — e.g., `https://`, `redis://`.
+                    if next == b'/' && j + 2 < len && bytes[j + 2] == b'/' {
+                        j += 1;
+                        continue;
+                    }
                     // Skip `:` followed by space, newline
                     if next != b' ' && next != b'\n' && next != b'\r' {
                         // Check that the colon is a hash key colon (preceded by a word char)

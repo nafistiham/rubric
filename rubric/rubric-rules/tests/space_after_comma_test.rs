@@ -27,3 +27,30 @@ fn no_false_positive_on_comma_in_string() {
     let diags = SpaceAfterComma.check_source(&ctx);
     assert!(diags.is_empty(), "should not flag commas inside strings, got: {:?}", diags);
 }
+
+// ── False positive: commas in inline comments ─────────────────────────────────
+#[test]
+fn no_false_positive_for_comma_in_inline_comment() {
+    let src = "x = foo # perform_async(1,2,3)\n# a comment with [Time,Range]\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterComma.check_source(&ctx);
+    assert!(diags.is_empty(), "commas in comments falsely flagged: {:?}", diags);
+}
+
+// ── False positive: commas inside backtick shell strings ─────────────────────
+#[test]
+fn no_false_positive_for_comma_in_backtick_string() {
+    let src = "result = `ps -o pid,rss -p #{pid}`.strip\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterComma.check_source(&ctx);
+    assert!(diags.is_empty(), "commas in backtick string falsely flagged: {:?}", diags);
+}
+
+// ── False positive: comma inside nested string in interpolation ───────────────
+#[test]
+fn no_false_positive_for_comma_in_nested_interpolated_string() {
+    let src = "x = \"#{arr.join(\",\")}\"\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterComma.check_source(&ctx);
+    assert!(diags.is_empty(), "commas in interpolated string falsely flagged: {:?}", diags);
+}
