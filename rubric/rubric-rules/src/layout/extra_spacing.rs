@@ -16,6 +16,12 @@ fn has_eq_at_col(line: &str, col: usize) -> bool {
         && next != b'=' && next != b'>'
 }
 
+/// Returns true if `line` has `ch` at byte column `col`.
+fn has_char_at_col(line: &str, col: usize, ch: u8) -> bool {
+    let bytes = line.as_bytes();
+    col < bytes.len() && bytes[col] == ch
+}
+
 impl Rule for ExtraSpacing {
     fn name(&self) -> &'static str {
         "Layout/ExtraSpacing"
@@ -95,6 +101,21 @@ impl Rule for ExtraSpacing {
                                 j = span_end;
                                 continue;
                             }
+                        }
+                    }
+
+                    // Skip general column-alignment: any non-space token aligned across
+                    // adjacent lines (e.g. `after_create_commit  :foo` / `after_destroy_commit :foo`).
+                    if span_end < len && bytes[span_end] != b' ' {
+                        let target_char = bytes[span_end];
+                        let target_col = indent_len + span_end;
+                        let is_aligned = (i > 0 && has_char_at_col(&lines[i - 1], target_col, target_char))
+                            || (i + 1 < lines.len() && has_char_at_col(&lines[i + 1], target_col, target_char))
+                            || (i > 1 && has_char_at_col(&lines[i - 2], target_col, target_char))
+                            || (i + 2 < lines.len() && has_char_at_col(&lines[i + 2], target_col, target_char));
+                        if is_aligned {
+                            j = span_end;
+                            continue;
                         }
                     }
 

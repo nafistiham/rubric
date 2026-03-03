@@ -44,8 +44,14 @@ impl Rule for SpaceAfterColon {
                         j += 1;
                         continue;
                     }
-                    // Skip `:` followed by space, newline
+                    // Skip `:` followed by `]` — POSIX character class closing delimiter
+                    // (e.g., `[:word:]`, `[:alpha:]`) or array access. Never a hash key.
                     let next = bytes[j + 1];
+                    if next == b']' {
+                        j += 1;
+                        continue;
+                    }
+                    // Skip `:` followed by space, newline
                     if next != b' ' && next != b'\n' && next != b'\r' {
                         // Check that the colon is a hash key colon (preceded by a word char)
                         let preceded_by_word = j > 0 && (bytes[j - 1].is_ascii_alphanumeric() || bytes[j - 1] == b'_');

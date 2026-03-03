@@ -60,6 +60,16 @@ fn no_false_positive_for_spaces_before_comment() {
     assert!(diags.is_empty(), "expected no violations for comment-alignment, got: {:?}", diags);
 }
 
+// ── Column-aligned symbol (`:`) across consecutive lines must NOT fire ──────
+// e.g. `after_create_commit  :foo` / `after_destroy_commit :foo` — `:` aligned
+#[test]
+fn no_false_positive_for_column_aligned_symbol() {
+    let src = "  after_create_commit  :increment_counter_caches\n  after_destroy_commit :decrement_counter_caches\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ExtraSpacing.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for column-aligned : symbol, got: {:?}", diags);
+}
+
 // ── Column-aligned `=` in consecutive assignments must NOT fire ────────────
 #[test]
 fn no_false_positive_for_column_aligned_assignments() {

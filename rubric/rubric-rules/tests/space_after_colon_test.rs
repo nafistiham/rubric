@@ -21,3 +21,21 @@ fn no_violation_with_space_after_colon() {
     let diags = SpaceAfterColon.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+// ── False positive: POSIX character class closing `:` (e.g., `[:word:]`) ────
+#[test]
+fn no_false_positive_for_posix_char_class_in_regex() {
+    let src = "names = str.scan(/[[:word:]]+/)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterColon.check_source(&ctx);
+    assert!(diags.is_empty(), "POSIX char class [:word:] falsely flagged: {:?}", diags);
+}
+
+// ── False positive: `[:word:]` inside %r{} percent regex ────────────────────
+#[test]
+fn no_false_positive_for_posix_char_class_in_percent_regex() {
+    let src = "RE = %r{(?<![=/[:word:]])@foo}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterColon.check_source(&ctx);
+    assert!(diags.is_empty(), "POSIX char class [:word:] in %r{{}} falsely flagged: {:?}", diags);
+}
