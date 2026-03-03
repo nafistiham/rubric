@@ -30,7 +30,15 @@ impl Rule for ClassAndModuleChildren {
             };
 
             // Detect compact notation: ClassName::SubName
-            if rest.contains("::") {
+            // Only check the class/module NAME itself, not the parent class after `<`.
+            // e.g. `class Foo::Bar` → compact (flag)
+            //      `class Foo < A::B` → parent class ref only (skip)
+            let name_part = if is_class {
+                rest.split_once(" < ").map(|(n, _)| n).unwrap_or(rest)
+            } else {
+                rest
+            };
+            if name_part.contains("::") {
                 let indent = line.len() - trimmed.len();
                 let line_start = ctx.line_start_offsets[i] as usize;
                 let pos = (line_start + indent) as u32;
