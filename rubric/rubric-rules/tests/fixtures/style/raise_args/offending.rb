@@ -1,2 +1,3 @@
-raise RuntimeError, "something went wrong"
-raise ArgumentError, "bad argument"
+raise RuntimeError.new("something went wrong")
+raise ArgumentError.new("bad argument")
+raise TypeError.new("wrong type")
