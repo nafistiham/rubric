@@ -21,3 +21,12 @@ fn no_violation_with_space_around_block_parameters() {
     let diags = SpaceAroundBlockParameters.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+// ── False positive: `{|}` characters inside a string literal ─────────────────
+#[test]
+fn no_false_positive_for_block_chars_inside_string() {
+    let src = "chars = \"!#$%&'*+-/=?^_`{|}~.\".chars\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundBlockParameters.check_source(&ctx);
+    assert!(diags.is_empty(), "{{|}} inside string literal falsely flagged: {:?}", diags);
+}

@@ -16,7 +16,19 @@ impl Rule for SpaceAroundBlockParameters {
             let len = bytes.len();
 
             let mut j = 0;
+            let mut in_string: Option<u8> = None;
             while j < len {
+                let b = bytes[j];
+                // String tracking — skip characters inside string literals
+                match in_string {
+                    Some(_) if b == b'\\' => { j += 2; continue; }
+                    Some(delim) if b == delim => { in_string = None; j += 1; continue; }
+                    Some(_) => { j += 1; continue; }
+                    None if b == b'"' || b == b'\'' => { in_string = Some(b); j += 1; continue; }
+                    None if b == b'#' => break, // inline comment
+                    None => {}
+                }
+
                 // Detect `{|` — open brace immediately followed by pipe (no space)
                 if bytes[j] == b'{' && j + 1 < len && bytes[j+1] == b'|' {
                     let pos = (line_start + j) as u32;
