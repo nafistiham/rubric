@@ -3,6 +3,25 @@ use std::collections::HashMap;
 
 pub struct UselessAssignment;
 
+/// Returns true if the trimmed line contains `keyword` as a standalone word token.
+fn line_contains_keyword(line: &str, keyword: &str) -> bool {
+    let lb = line.as_bytes();
+    let kb = keyword.as_bytes();
+    let n = lb.len();
+    let kn = kb.len();
+    if kn == 0 || n < kn { return false; }
+    let mut i = 0;
+    while i + kn <= n {
+        if &lb[i..i+kn] == kb {
+            let before_ok = i == 0 || (!lb[i-1].is_ascii_alphanumeric() && lb[i-1] != b'_');
+            let after_ok = i + kn >= n || (!lb[i+kn].is_ascii_alphanumeric() && lb[i+kn] != b'_');
+            if before_ok && after_ok { return true; }
+        }
+        i += 1;
+    }
+    false
+}
+
 impl Rule for UselessAssignment {
     fn name(&self) -> &'static str {
         "Lint/UselessAssignment"
@@ -30,7 +49,7 @@ impl Rule for UselessAssignment {
                 let t = lines[j].trim();
                 if t.starts_with("def ") || t.starts_with("if ") || t.starts_with("unless ")
                     || t.starts_with("do ") || t == "do" || t.starts_with("begin")
-                    || t.starts_with("case ")
+                    || line_contains_keyword(t, "case")
                     || t.starts_with("while ") || t == "while"
                     || t.starts_with("until ") || t == "until"
                     || t.starts_with("for ")
@@ -114,7 +133,9 @@ impl Rule for UselessAssignment {
             }
 
             // Now check which assigned variables are never read
-            // A variable is read if it appears in the block NOT as a write (LHS of assignment)
+            // A variable is read if it appears in the block NOT as a write (LHS of assignment).
+            // We scan each character, skipping single-quoted strings but scanning inside
+            // double-quoted strings so that #{var} interpolations are detected as reads.
             'outer: for (var, (assign_line, assign_col)) in &assignments {
                 // Check all lines in the block for a read of `var`
                 for k in (def_start + 1)..def_end.min(n) {
@@ -122,25 +143,74 @@ impl Rule for UselessAssignment {
                     let line_bytes = line.as_bytes();
                     let line_len = line_bytes.len();
                     let mut pos = 0;
-                    let mut in_string: Option<u8> = None;
+                    let mut in_single_string = false;
+                    let mut in_double_string = false;
 
                     while pos < line_len {
                         let b = line_bytes[pos];
-                        match in_string {
-                            Some(_) if b == b'\\' => { pos += 2; continue; }
-                            Some(delim) if b == delim => { in_string = None; pos += 1; continue; }
-                            Some(_) => { pos += 1; continue; }
-                            None if b == b'"' || b == b'\'' => { in_string = Some(b); pos += 1; continue; }
-                            None if b == b'#' => break,
-                            None => {}
+
+                        // Handle single-quoted strings (skip content, no interpolation)
+                        if in_single_string {
+                            if b == b'\\' { pos += 2; continue; }
+                            if b == b'\'' { in_single_string = false; }
+                            pos += 1;
+                            continue;
                         }
+
+                        // Handle double-quoted strings (allow #{} interpolation scanning)
+                        if in_double_string {
+                            if b == b'\\' { pos += 2; continue; }
+                            if b == b'"' { in_double_string = false; pos += 1; continue; }
+                            // Inside #{...} fall through to normal scanning below
+                            if b == b'#' {
+                                let next = if pos + 1 < line_len { line_bytes[pos+1] } else { 0 };
+                                if next != b'{' {
+                                    // Not interpolation, skip
+                                    pos += 1;
+                                    continue;
+                                }
+                                // #{...} — advance past #{ and scan normally until matching }
+                                pos += 2; // skip #{
+                                let mut depth = 1usize;
+                                while pos < line_len && depth > 0 {
+                                    let ib = line_bytes[pos];
+                                    if ib == b'{' { depth += 1; }
+                                    else if ib == b'}' {
+                                        depth -= 1;
+                                        if depth == 0 { pos += 1; break; }
+                                    }
+                                    // Check for variable read inside interpolation
+                                    let vb = var.as_bytes();
+                                    if pos + vb.len() <= line_len && &line_bytes[pos..pos+vb.len()] == vb {
+                                        let before_ok = pos == 0 || (!line_bytes[pos-1].is_ascii_alphanumeric() && line_bytes[pos-1] != b'_');
+                                        let after_ok = pos + vb.len() >= line_len || (!line_bytes[pos+vb.len()].is_ascii_alphanumeric() && line_bytes[pos+vb.len()] != b'_');
+                                        if before_ok && after_ok {
+                                            let is_assignment_lhs = k == *assign_line && pos == *assign_col;
+                                            if !is_assignment_lhs {
+                                                continue 'outer;
+                                            }
+                                        }
+                                    }
+                                    pos += 1;
+                                }
+                                continue;
+                            }
+                            // Other chars inside double string — skip
+                            pos += 1;
+                            continue;
+                        }
+
+                        // Normal (non-string) context
+                        if b == b'\'' { in_single_string = true; pos += 1; continue; }
+                        if b == b'"' { in_double_string = true; pos += 1; continue; }
+                        if b == b'#' { break; } // inline comment
 
                         // Check if `var` appears at this position
                         let vb = var.as_bytes();
                         if pos + vb.len() <= line_len && &line_bytes[pos..pos+vb.len()] == vb {
                             // Check word boundary (not part of a larger identifier)
-                            let before_ok = pos == 0 || !line_bytes[pos-1].is_ascii_alphanumeric() && line_bytes[pos-1] != b'_';
-                            let after_ok = pos + vb.len() >= line_len || !line_bytes[pos+vb.len()].is_ascii_alphanumeric() && line_bytes[pos+vb.len()] != b'_';
+                            let before_ok = pos == 0 || (!line_bytes[pos-1].is_ascii_alphanumeric() && line_bytes[pos-1] != b'_');
+                            let after_ok = pos + vb.len() >= line_len || (!line_bytes[pos+vb.len()].is_ascii_alphanumeric() && line_bytes[pos+vb.len()] != b'_');
 
                             if before_ok && after_ok {
                                 // Check if this is the assignment itself (LHS)

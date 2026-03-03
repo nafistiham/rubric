@@ -21,3 +21,21 @@ fn no_violation_with_all_vars_used() {
     let diags = UselessAssignment.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+// ── False positive: variable assigned via inline `case` then used ─────────────
+#[test]
+fn no_false_positive_for_inline_case_assignment() {
+    let src = "def force_shutdown_after(val)\n  i = case val\n      when :forever\n        -1\n      else\n        Float(val)\n      end\n  @options[:shutdown] = i\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = UselessAssignment.check_source(&ctx);
+    assert!(diags.is_empty(), "inline case assignment falsely flagged: {:?}", diags);
+}
+
+// ── False positive: variable used in string interpolation ────────────────────
+#[test]
+fn no_false_positive_for_string_interpolation_usage() {
+    let src = "def build_url(opts)\n  tls_str = opts[:tls] ? '&tls=true' : ''\n  \"ssl://host?#{tls_str}&other\"\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = UselessAssignment.check_source(&ctx);
+    assert!(diags.is_empty(), "string interpolation usage falsely flagged: {:?}", diags);
+}
