@@ -75,3 +75,49 @@ fn no_false_positive_for_url_scheme() {
     let diags = SpaceAfterColon.check_source(&ctx);
     assert!(diags.is_empty(), "URL scheme :// falsely flagged: {:?}", diags);
 }
+
+// ── False positive: colon inside %r!...! percent regex ───────────────────────
+#[test]
+fn no_false_positive_for_colon_in_percent_regex() {
+    let src = "m = %r!http://127.0.0.1:(\\d+)!.match(str)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterColon.check_source(&ctx);
+    assert!(diags.is_empty(), "colon in %r!...! percent regex falsely flagged: {:?}", diags);
+}
+
+// ── False positive: colon inside standard regex `/pattern:/` ─────────────────
+#[test]
+fn no_false_positive_for_colon_in_regex() {
+    let src = "result_str.gsub!(/\\A(Failure:|Error:)\\s/, '\\1 ')\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterColon.check_source(&ctx);
+    assert!(diags.is_empty(), "colon in /regex/ falsely flagged: {:?}", diags);
+}
+
+// ── False positive: colon inside double-quoted string ────────────────────────
+#[test]
+fn no_false_positive_for_colon_in_string() {
+    let src = "url = \"http://host:8080/path\"\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterColon.check_source(&ctx);
+    assert!(diags.is_empty(), "colon in string falsely flagged: {:?}", diags);
+}
+
+// ── False positive: colon inside heredoc body ────────────────────────────────
+#[test]
+fn no_false_positive_for_colon_in_heredoc() {
+    let src = "req = <<~REQ\n  X:POST / HTTP/1.1\n  Host: example.com:456\nREQ\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterColon.check_source(&ctx);
+    assert!(diags.is_empty(), "colon in heredoc body falsely flagged: {:?}", diags);
+}
+
+// ── Still detects missing space in hash literal ───────────────────────────────
+#[test]
+fn still_detects_missing_space_in_hash() {
+    let src = "x = {a:1, b:2}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterColon.check_source(&ctx);
+    assert!(!diags.is_empty(), "expected violations for {{a:1}}, got none");
+    assert_eq!(diags.len(), 2, "expected 2 violations, got: {:?}", diags);
+}
