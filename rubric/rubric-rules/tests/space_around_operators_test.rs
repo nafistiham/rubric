@@ -94,6 +94,15 @@ fn no_violation_for_setter_method_definition() {
     assert!(diags.is_empty(), "expected no violations for setter method def, got: {:?}", diags);
 }
 
+// ── False positive: setter method call (self.foo=val) ────────────────────────
+#[test]
+fn no_violation_for_setter_method_call() {
+    let src = "self.discard_column=:deleted_at\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for setter method call, got: {:?}", diags);
+}
+
 // ── False positive: %r{...} percent-regex content ────────────────────────────
 #[test]
 fn no_violation_for_percent_r_regex_content() {

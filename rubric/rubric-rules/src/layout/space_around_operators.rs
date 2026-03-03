@@ -171,6 +171,18 @@ impl Rule for SpaceAroundOperators {
                             j += 1;
                             continue;
                         }
+                        // Skip setter method calls: self.foo=val, obj.attr=val
+                        // Scan backward through identifier chars; if preceded by `.` it's a setter call
+                        {
+                            let mut k = j;
+                            while k > 0 && (bytes[k-1].is_ascii_alphanumeric() || bytes[k-1] == b'_') {
+                                k -= 1;
+                            }
+                            if k > 0 && bytes[k-1] == b'.' {
+                                j += 1;
+                                continue;
+                            }
+                        }
                         let prev_ok = j == 0 || prev == b' ' || prev == b'\t';
                         let next_ok = next == b' ' || next == b'\t' || next == 0;
                         if !prev_ok || !next_ok {
