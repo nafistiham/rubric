@@ -38,13 +38,22 @@ impl Rule for TernaryParentheses {
                     // Check if `) ?` follows
                     if depth == 0 && close_pos + 1 < len && bytes[close_pos + 1] == b' '
                         && close_pos + 2 < len && bytes[close_pos + 2] == b'?' {
-                        let line_start = ctx.line_start_offsets[i];
-                        diags.push(Diagnostic {
-                            rule: self.name(),
-                            message: "Unnecessary parentheses around ternary condition.".into(),
-                            range: TextRange::new(line_start + open_pos as u32, line_start + (close_pos + 1) as u32),
-                            severity: Severity::Warning,
-                        });
+                        // Skip if the `(` is preceded by a word character — that means it
+                        // opens a method argument list (e.g. `is_a?(Proc) ?` or
+                        // `respond_to?(:sym) ?`), not a condition-wrapping paren.
+                        let is_method_arg = open_pos > 0 && {
+                            let prev = bytes[open_pos - 1];
+                            prev.is_ascii_alphanumeric() || prev == b'_' || prev == b'?'
+                        };
+                        if !is_method_arg {
+                            let line_start = ctx.line_start_offsets[i];
+                            diags.push(Diagnostic {
+                                rule: self.name(),
+                                message: "Unnecessary parentheses around ternary condition.".into(),
+                                range: TextRange::new(line_start + open_pos as u32, line_start + (close_pos + 1) as u32),
+                                severity: Severity::Warning,
+                            });
+                        }
                     }
                     j = k;
                     continue;

@@ -21,3 +21,57 @@ fn no_violation_for_ternary_without_parens() {
     let diags = TernaryParentheses.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+// FP: is_a?(Type) ? — the `(` opens a method argument list, not a ternary condition wrapper
+#[test]
+fn no_false_positive_for_is_a_predicate_method_before_ternary() {
+    let src = "x = obj.is_a?(String) ? 'yes' : 'no'\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = TernaryParentheses.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for is_a? method call, got: {:?}", diags);
+}
+
+// FP: respond_to?(:sym) ? — same pattern, predicate method with symbol arg
+#[test]
+fn no_false_positive_for_respond_to_predicate_method_before_ternary() {
+    let src = "sym = k.respond_to?(:to_sym) ? k.to_sym : k\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = TernaryParentheses.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for respond_to? method call, got: {:?}", diags);
+}
+
+// FP: method?(arg) ? — generic predicate method with any identifier arg
+#[test]
+fn no_false_positive_for_generic_predicate_method_before_ternary() {
+    let src = "x = check?(Proc) ? a : b\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = TernaryParentheses.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for predicate method call, got: {:?}", diags);
+}
+
+// Real violation: (comparison) ? — space before `(` means it wraps the condition
+#[test]
+fn still_detects_unnecessary_parens_around_comparison() {
+    let src = "x = (a > b) ? 'yes' : 'no'\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = TernaryParentheses.check_source(&ctx);
+    assert!(!diags.is_empty(), "expected violation for (a > b) ?, got none");
+}
+
+// Real violation: (Hash === v) ?
+#[test]
+fn still_detects_unnecessary_parens_around_case_equality() {
+    let src = "result = (Hash === v) ? x : y\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = TernaryParentheses.check_source(&ctx);
+    assert!(!diags.is_empty(), "expected violation for (Hash === v) ?, got none");
+}
+
+// Real violation: (pageidx.to_i < 1) ?
+#[test]
+fn still_detects_unnecessary_parens_around_method_call_comparison() {
+    let src = "p = (pageidx.to_i < 1) ? 1 : pageidx.to_i\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = TernaryParentheses.check_source(&ctx);
+    assert!(!diags.is_empty(), "expected violation for (pageidx.to_i < 1) ?, got none");
+}
