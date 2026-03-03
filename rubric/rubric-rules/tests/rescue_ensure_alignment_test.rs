@@ -21,3 +21,21 @@ fn no_violation_for_aligned_rescue() {
     let diags = RescueEnsureAlignment.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+// `rescue` inside a `do...end` block must align with the `do` line's indent,
+// not with the enclosing `def`
+#[test]
+fn no_false_positive_for_rescue_inside_do_block() {
+    let src = concat!(
+        "  def fields\n",
+        "    (self[:fields] || []).filter_map do |f|\n",
+        "      Account::Field.new(self, f)\n",
+        "    rescue\n",
+        "      nil\n",
+        "    end\n",
+        "  end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = RescueEnsureAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "rescue inside do block falsely flagged: {:?}", diags);
+}

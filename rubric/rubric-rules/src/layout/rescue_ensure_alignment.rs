@@ -22,10 +22,17 @@ impl Rule for RescueEnsureAlignment {
             let trimmed = line.trim_start();
             let indent = line.len() - trimmed.len();
 
+            // Detect `do` block openers: `foo do`, `foo do |x|`, etc.
+            let opens_do_block = (trimmed.ends_with(" do")
+                || trimmed.contains(" do |")
+                || trimmed.contains(" do\n"))
+                && !trimmed.starts_with("def ")
+                && trimmed != "def";
+
             if trimmed.starts_with("begin") || trimmed.starts_with("def ")
-                || trimmed == "def" {
+                || trimmed == "def" || opens_do_block {
                 indent_stack.push(indent);
-            } else if trimmed == "end" || trimmed.starts_with("end ") {
+            } else if trimmed == "end" || trimmed.starts_with("end ") || trimmed.starts_with("end.") {
                 indent_stack.pop();
             } else if trimmed.starts_with("rescue") || trimmed.starts_with("ensure") {
                 // Check alignment: should match the most recent begin/def indent

@@ -21,3 +21,13 @@ fn no_violation_for_different_operands() {
     let diags = UselessComparison.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+// `thread.account_id == account_id` — LHS has a receiver (`thread.`), RHS is bare
+// These are DIFFERENT expressions and must not be flagged
+#[test]
+fn no_false_positive_for_receiver_dot_attr_vs_bare_local() {
+    let src = "if thread.account_id == account_id && thread.reply?\n  true\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = UselessComparison.check_source(&ctx);
+    assert!(diags.is_empty(), "receiver.attr == bare_local falsely flagged: {:?}", diags);
+}
