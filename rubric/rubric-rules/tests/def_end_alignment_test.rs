@@ -92,3 +92,26 @@ fn no_false_positive_for_shovel_if_inside_def() {
     let diags = DefEndAlignment.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations for << if inside def, got: {:?}", diags);
 }
+
+// ── False positive: inline `if` with nested inline `begin` inside def ─────────
+#[test]
+fn no_false_positive_for_inline_if_with_nested_inline_begin() {
+    let src = concat!(
+        "def fetch\n",
+        "  result = if entry\n",
+        "    job = begin\n",
+        "      load(entry)\n",
+        "    rescue\n",
+        "      {}\n",
+        "    end\n",
+        "    compute(job)\n",
+        "  else\n",
+        "    0.0\n",
+        "  end\n",
+        "  result\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "nested inline begin in inline if falsely flagged: {:?}", diags);
+}

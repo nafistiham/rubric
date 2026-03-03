@@ -44,7 +44,7 @@ impl Rule for DefEndAlignment {
                 || t == "do"
             );
 
-            // Inline conditional assignment: `x = if cond` / `x = unless cond` / `x = case val`
+            // Inline conditional/begin assignment: `x = if cond` / `x = unless` / `x = case` / `x = begin`
             // The `end` that closes these should NOT be compared to the enclosing def.
             let has_inline_conditional = !is_def_opener && !is_inner_construct && (
                 t.contains(" = if ") || t.ends_with(" = if")
@@ -53,6 +53,8 @@ impl Rule for DefEndAlignment {
                 || t.contains(" << if ") || t.ends_with(" << if")
                 || t.contains(" << unless ") || t.ends_with(" << unless")
                 || t.contains(" << case ") || t.ends_with(" << case")
+                // `var = begin` inline begin/rescue/end block
+                || t.ends_with(" begin") || t.contains(" = begin ")
             );
 
             if is_def_opener {

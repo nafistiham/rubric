@@ -39,12 +39,14 @@ impl Rule for EndAlignment {
                 || trimmed.starts_with("begin ") || trimmed.starts_with("case ")
                 || trimmed == "do" || trimmed.ends_with(" do") || trimmed.contains(" do |") || trimmed.contains(" do|");
 
-            // Detect inline if/unless/case assignments that open a block mid-line
-            // Pattern: something = if condition  (or unless/case)
+            // Detect inline if/unless/case/begin assignments that open a block mid-line
+            // Pattern: something = if condition  (or unless/case/begin)
             let is_inline_opener = !is_block_opener && (
                 (trimmed.contains(" = if ") || trimmed.contains(" = unless ") || trimmed.contains(" = case "))
                 || (trimmed.contains(" << if ") || trimmed.contains(" << unless ") || trimmed.contains(" << case "))
                 || (trimmed.contains("(if ") || trimmed.contains("(unless ") || trimmed.contains("(case "))
+                // `var = begin` inline begin/rescue/end block
+                || trimmed.ends_with(" begin") || trimmed.contains(" = begin ")
             );
 
             if is_block_opener {
