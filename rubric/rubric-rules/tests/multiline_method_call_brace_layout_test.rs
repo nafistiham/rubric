@@ -47,3 +47,18 @@ fn detects_bare_open_paren_style_violation() {
     let diags = MultilineMethodCallBraceLayout.check_source(&ctx);
     assert!(!diags.is_empty(), "bare-open-paren style with ) on arg line should be flagged");
 }
+
+// ── FP: parentheses balanced on the same line — not a multiline closer ────────
+// e.g. `(supplemental ? translate('...') : [])` — both `(` and `)` on same line
+#[test]
+fn no_false_positive_for_balanced_parens_on_line() {
+    let src = concat!(
+        "word_list = (\n",
+        "  translate('faker.lorem.words') +\n",
+        "  (supplemental ? translate('faker.lorem.supplemental') : [])\n",
+        ")\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = MultilineMethodCallBraceLayout.check_source(&ctx);
+    assert!(diags.is_empty(), "balanced parens on line falsely flagged: {:?}", diags);
+}

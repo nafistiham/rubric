@@ -17,6 +17,14 @@ impl Rule for MultilineMethodCallBraceLayout {
             let trimmed = line.trim();
             // Closing `)` on same line as last argument in multiline call
             if trimmed.ends_with(')') && !trimmed.starts_with(')') && trimmed.len() > 1 {
+                // Skip if parentheses are balanced on this line — the trailing `)`
+                // closes a `(` opened on the same line, not a previous-line multiline call.
+                let open_count = trimmed.bytes().filter(|&b| b == b'(').count();
+                let close_count = trimmed.bytes().filter(|&b| b == b')').count();
+                if open_count >= close_count {
+                    continue;
+                }
+
                 // Check if previous lines have unclosed `(`
                 let mut j = i;
                 let mut is_multiline = false;

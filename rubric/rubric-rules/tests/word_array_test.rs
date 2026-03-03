@@ -21,3 +21,12 @@ fn no_violation_with_percent_w_syntax() {
     let diags = WordArray.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+// Arrays in YARD/RDoc comment examples must not be flagged
+#[test]
+fn no_false_positive_for_array_in_comment() {
+    let src = "#   Faker::Lorem.words  #=> [\"hic\", \"quia\", \"nihil\"]\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = WordArray.check_source(&ctx);
+    assert!(diags.is_empty(), "array in comment example falsely flagged: {:?}", diags);
+}

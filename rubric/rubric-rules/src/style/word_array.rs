@@ -11,12 +11,20 @@ impl Rule for WordArray {
         let mut diags = Vec::new();
 
         for (i, line) in ctx.lines.iter().enumerate() {
+            // Skip comment lines — arrays in doc examples must not be flagged
+            if line.trim_start().starts_with('#') {
+                continue;
+            }
             let line_start = ctx.line_start_offsets[i] as usize;
             let bytes = line.as_bytes();
             let len = bytes.len();
             let mut j = 0;
 
             while j < len {
+                // Stop at start of inline comment
+                if bytes[j] == b'#' {
+                    break;
+                }
                 // Look for `[` to start an array literal
                 if bytes[j] != b'[' {
                     j += 1;
