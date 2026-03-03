@@ -22,6 +22,30 @@ fn no_violation_with_all_vars_used() {
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
 
+// ── False positive: variable assigned with `{...}` block result then used ─────
+#[test]
+fn no_false_positive_for_curly_block_assignment_then_used() {
+    let src = concat!(
+        "def queues\n",
+        "  Sidekiq.redis do |conn|\n",
+        "    queues = conn.sscan('queues').to_a\n",
+        "\n",
+        "    lengths = conn.pipelined { |pipeline|\n",
+        "      queues.each do |queue|\n",
+        "        pipeline.llen(queue)\n",
+        "      end\n",
+        "    }\n",
+        "\n",
+        "    array_of_arrays = queues.zip(lengths).sort_by { |_, size| -size }\n",
+        "    array_of_arrays.to_h\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = UselessAssignment.check_source(&ctx);
+    assert!(diags.is_empty(), "curly block assignment falsely flagged: {:?}", diags);
+}
+
 // ── False positive: variable assigned via inline `case` then used ─────────────
 #[test]
 fn no_false_positive_for_inline_case_assignment() {

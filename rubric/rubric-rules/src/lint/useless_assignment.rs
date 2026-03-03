@@ -48,7 +48,7 @@ impl Rule for UselessAssignment {
             while j < n && depth > 0 {
                 let t = lines[j].trim();
                 if t.starts_with("def ") || t.starts_with("if ") || t.starts_with("unless ")
-                    || t.starts_with("do ") || t == "do" || t.starts_with("begin")
+                    || line_contains_keyword(t, "do") || t.starts_with("begin")
                     || line_contains_keyword(t, "case")
                     || t.starts_with("while ") || t == "while"
                     || t.starts_with("until ") || t == "until"
