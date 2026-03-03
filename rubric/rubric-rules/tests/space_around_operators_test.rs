@@ -156,3 +156,62 @@ fn no_false_positive_for_multiple_parameter_defaults() {
     let diags = SpaceAroundOperators.check_source(&ctx);
     assert!(diags.is_empty(), "multiple parameter defaults falsely flagged: {:?}", diags);
 }
+
+// ── False positive: :[]]= symbol method literal ─────────────────────────────
+#[test]
+fn no_false_positive_for_bracket_assign_symbol() {
+    let src = "def_delegators :@config, :[], :[]=, :fetch\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), ":[]]= symbol falsely flagged: {:?}", diags);
+}
+
+// ── False positive: :method= symbol (e.g., :config=, :bid=) ─────────────────
+#[test]
+fn no_false_positive_for_method_eq_symbol() {
+    let src = "x.respond_to?(:config=)\nx.respond_to?(:bid=)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), ":method= symbol falsely flagged: {:?}", diags);
+}
+
+// ── False positive: splat `*` in block params `|*args|` ─────────────────────
+#[test]
+fn no_false_positive_for_splat_in_block_params() {
+    let src = "define_method(name) do |*args, **kwargs|\n  @client.call(name, *args, **kwargs)\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "|*args| splat falsely flagged: {:?}", diags);
+}
+
+// ── False positive: <<- heredoc sigil's `-` ──────────────────────────────────
+#[test]
+fn no_false_positive_for_heredoc_dash_sigil() {
+    let src = concat!(
+        "Action.class_eval <<-RUBY, filename, -1\n",
+        "  def foo\n",
+        "    bar\n",
+        "  end\n",
+        "RUBY\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "<<- heredoc sigil falsely flagged: {:?}", diags);
+}
+
+// ── False positive: operators inside <<~ heredoc body ────────────────────────
+#[test]
+fn no_false_positive_for_operators_in_heredoc_body() {
+    let src = concat!(
+        "def warn_msg\n",
+        "  logger.warn <<~EOM\n",
+        "    Your process is not CPU-saturated; reduce concurrency and/or\n",
+        "    See: https://github.com/example/repo/wiki/Using-Redis#memory\n",
+        "    REDIS_PROVIDER=REDISTOGO_URL\n",
+        "  EOM\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "heredoc body operators falsely flagged: {:?}", diags);
+}

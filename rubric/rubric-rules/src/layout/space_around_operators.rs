@@ -2,6 +2,36 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct SpaceAroundOperators;
 
+/// If `line` opens a heredoc, return the terminator string (e.g., "EOM", "RUBY").
+/// Handles `<<WORD`, `<<-WORD`, `<<~WORD`, and quoted variants `<<~'WORD'`.
+fn detect_heredoc_terminator(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let n = bytes.len();
+    let mut i = 0;
+    while i + 1 < n {
+        if bytes[i] == b'<' && bytes[i + 1] == b'<' {
+            i += 2;
+            if i < n && (bytes[i] == b'-' || bytes[i] == b'~') {
+                i += 1;
+            }
+            // Optional surrounding quote (<<~'EOM', <<~"EOM")
+            if i < n && (bytes[i] == b'\'' || bytes[i] == b'"' || bytes[i] == b'`') {
+                i += 1;
+            }
+            let word_start = i;
+            while i < n && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            if i > word_start {
+                return Some(line[word_start..i].to_string());
+            }
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
 impl Rule for SpaceAroundOperators {
     fn name(&self) -> &'static str {
         "Layout/SpaceAroundOperators"
@@ -9,8 +39,18 @@ impl Rule for SpaceAroundOperators {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        // Cross-line heredoc tracking: Some(terminator) while inside a heredoc body.
+        let mut in_heredoc: Option<String> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
+            // Skip lines that are inside a heredoc body (including the terminator line).
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim() == term.as_str() {
+                    in_heredoc = None;
+                }
+                continue;
+            }
+
             let line_start = ctx.line_start_offsets[i] as usize;
             let bytes = line.as_bytes();
             let len = bytes.len();
@@ -21,6 +61,12 @@ impl Rule for SpaceAroundOperators {
             let trimmed_line = line.trim_start();
             let is_def_line = trimmed_line.starts_with("def ");
             let mut paren_depth: i32 = 0;
+
+            // Detect if this line opens a heredoc (body starts on the next line).
+            if let Some(term) = detect_heredoc_terminator(line) {
+                in_heredoc = Some(term);
+                // Fall through: still check operators on the opener line itself.
+            }
 
             while j < len {
                 let b = bytes[j];
@@ -175,14 +221,24 @@ impl Rule for SpaceAroundOperators {
                             j += 1;
                             continue;
                         }
-                        // Skip setter method calls: self.foo=val, obj.attr=val
-                        // Scan backward through identifier chars; if preceded by `.` it's a setter call
+                        // Skip `[]=` operator as symbol: :[], :[]=
+                        if prev == b']' {
+                            j += 1;
+                            continue;
+                        }
+                        // Scan backward through identifier chars; check predecessor
                         {
                             let mut k = j;
                             while k > 0 && (bytes[k-1].is_ascii_alphanumeric() || bytes[k-1] == b'_') {
                                 k -= 1;
                             }
+                            // Skip setter method calls: self.foo=val, obj.attr=val
                             if k > 0 && bytes[k-1] == b'.' {
+                                j += 1;
+                                continue;
+                            }
+                            // Skip symbol method name: :config=, :bid=, :name=
+                            if k > 0 && bytes[k-1] == b':' {
                                 j += 1;
                                 continue;
                             }
@@ -249,6 +305,10 @@ impl Rule for SpaceAroundOperators {
                         if prev == b'(' || prev == b'[' || prev == b',' || prev == b' '
                             || prev == b'\t' || prev == 0 || prev == b'=' || prev == b'+'
                             || prev == b'-' || prev == b'*' || prev == b'/'
+                            // Splat/unary after `|` in block params: |*args|
+                            || prev == b'|'
+                            // `-` in `<<-RUBY` heredoc sigil
+                            || prev == b'<'
                         {
                             j += 1;
                             continue;
