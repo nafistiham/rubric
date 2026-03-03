@@ -44,17 +44,19 @@ impl Rule for DefEndAlignment {
                 || t == "do"
             );
 
-            // Inline conditional/begin assignment: `x = if cond` / `x = unless` / `x = case` / `x = begin`
+            // Inline conditional/begin assignment: `x = if cond` / `x ||= if` / `x = begin` / etc.
             // The `end` that closes these should NOT be compared to the enclosing def.
             let has_inline_conditional = !is_def_opener && !is_inner_construct && (
-                t.contains(" = if ") || t.ends_with(" = if")
-                || t.contains(" = unless ") || t.ends_with(" = unless")
-                || t.contains(" = case ") || t.ends_with(" = case")
+                // Any assignment variant (=, ||=, &&=, +=, etc.) followed by if/unless/case
+                t.contains("= if ") || t.ends_with("= if")
+                || t.contains("= unless ") || t.ends_with("= unless")
+                || t.contains("= case ") || t.ends_with("= case")
                 || t.contains(" << if ") || t.ends_with(" << if")
                 || t.contains(" << unless ") || t.ends_with(" << unless")
                 || t.contains(" << case ") || t.ends_with(" << case")
-                // `var = begin` inline begin/rescue/end block
-                || t.ends_with(" begin") || t.contains(" = begin ")
+                // `var = begin` / `var ||= begin` / `x || begin` inline begin/rescue/end block
+                || t.ends_with("= begin") || t.ends_with("|| begin") || t.ends_with("&& begin")
+                || t.contains("= begin ")
             );
 
             if is_def_opener {

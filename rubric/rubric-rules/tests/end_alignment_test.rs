@@ -54,6 +54,49 @@ fn no_false_positive_for_shovel_if_inline_conditional() {
     assert!(diags.is_empty(), "expected no violations for << if inline conditional, got: {:?}", diags);
 }
 
+// ── False positive: `||= if` compound assignment followed by if ──────────────
+#[test]
+fn no_false_positive_for_or_assign_inline_if() {
+    let src = concat!(
+        "def display_args\n",
+        "  @cache ||= if cond1\n",
+        "    if cond2\n",
+        "      val\n",
+        "    end\n",
+        "    args\n",
+        "  else\n",
+        "    args\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "||= if falsely flagged: {:?}", diags);
+}
+
+// ── False positive: `||= ... || begin` inline begin with nested if ────────────
+#[test]
+fn no_false_positive_for_inline_or_begin_with_nested_if() {
+    let src = concat!(
+        "def display_class\n",
+        "  @klass ||= self['x'] || begin\n",
+        "    if cond1\n",
+        "      if cond2\n",
+        "        args[0]\n",
+        "      else\n",
+        "        val\n",
+        "      end\n",
+        "    else\n",
+        "      klass\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "|| begin with nested if falsely flagged: {:?}", diags);
+}
+
 // ── False positive: inline `if` + nested inline `begin` assignment ────────────
 // Pattern: val = if cond / job = begin ... rescue ... end / ... / else / end
 #[test]
