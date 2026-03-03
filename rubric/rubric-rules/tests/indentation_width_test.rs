@@ -93,3 +93,32 @@ fn no_false_positive_for_shovel_if_continuation() {
     let diags = IndentationWidth.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations for << if continuation, got: {:?}", diags);
 }
+
+// ── Array elements aligned to opening `[` must NOT fire ──────────────────────
+// `sample([` on one line, elements at column 19 (alignment) — odd but valid.
+#[test]
+fn no_false_positive_for_array_alignment_indentation() {
+    let src = concat!(
+        "        sample([\n",
+        "                 :first_element,\n",
+        "                 :second_element,\n",
+        "               ])\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(diags.is_empty(), "array alignment indentation should not be flagged: {:?}", diags);
+}
+
+// ── Hash/method-call alignment after opening `(` must NOT fire ───────────────
+#[test]
+fn no_false_positive_for_hash_alignment_after_open_paren() {
+    let src = concat!(
+        "  reblog: [\n",
+        "    :application,\n",
+        "    :media_attachments,\n",
+        "  ]\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(diags.is_empty(), "content after [ on its own line should not be flagged: {:?}", diags);
+}

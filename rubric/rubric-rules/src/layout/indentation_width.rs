@@ -41,8 +41,27 @@ impl Rule for IndentationWidth {
             if spaces > 0 && spaces % 2 != 0 {
                 // Skip continuation lines — trailing comma means aligned argument continuation.
                 // Also skip lines inside inline conditional expressions (alignment to `if` keyword).
-                let is_comma_continuation = prev_nonempty_line.trim_end().ends_with(',');
-                if !is_comma_continuation && inline_cond_depth == 0 {
+                let prev_trim = prev_nonempty_line.trim_end();
+                let is_comma_continuation = prev_trim.ends_with(',');
+                // Skip when previous line ends with an opening bracket/delimiter —
+                // the next line uses alignment indentation to match the bracket position.
+                let is_bracket_continuation = prev_trim.ends_with('[')
+                    || prev_trim.ends_with('(')
+                    || prev_trim.ends_with('{')
+                    || prev_trim.ends_with('|');  // block params: `do |x|` / `{|x|`
+                // Skip closing tokens — they align with their opener, which may be odd-indented.
+                let trimmed_line = line.trim_start();
+                let is_end_keyword = trimmed_line == "end"
+                    || trimmed_line.starts_with("end ")
+                    || trimmed_line.starts_with("end.")
+                    || trimmed_line.starts_with("end\n");
+                let is_closing_token = is_end_keyword
+                    || trimmed_line.starts_with(']')
+                    || trimmed_line.starts_with(')')
+                    || trimmed_line.starts_with('}');
+                if !is_comma_continuation && !is_bracket_continuation
+                    && !is_closing_token && inline_cond_depth == 0
+                {
                     let start = ctx.line_start_offsets[i];
                     diags.push(Diagnostic {
                         rule: self.name(),
