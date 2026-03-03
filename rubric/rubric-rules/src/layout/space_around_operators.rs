@@ -17,6 +17,10 @@ impl Rule for SpaceAroundOperators {
             let mut j = 0;
             let mut in_string: Option<u8> = None;
             let mut in_regex = false;
+            // Track if this line is a def header so we can skip = in param defaults
+            let trimmed_line = line.trim_start();
+            let is_def_line = trimmed_line.starts_with("def ");
+            let mut paren_depth: i32 = 0;
 
             while j < len {
                 let b = bytes[j];
@@ -68,10 +72,10 @@ impl Rule for SpaceAroundOperators {
                     None => {}
                 }
 
-                // ── 3-char compound operators: ||=, &&= ──────────────────────
+                // ── 3-char compound operators: ||=, &&=, === ─────────────────
                 if j + 2 < len {
                     let three = &bytes[j..j+3];
-                    if three == b"||=" || three == b"&&=" {
+                    if three == b"||=" || three == b"&&=" || three == b"===" {
                         let prev_ok = j == 0 || bytes[j-1] == b' ' || bytes[j-1] == b'\t';
                         let next_ok = j + 3 >= len || bytes[j+3] == b' ' || bytes[j+3] == b'\t';
                         if !prev_ok || !next_ok {
@@ -183,6 +187,11 @@ impl Rule for SpaceAroundOperators {
                                 continue;
                             }
                         }
+                        // Skip = in method parameter defaults: def method(arg=default)
+                        if is_def_line && paren_depth > 0 {
+                            j += 1;
+                            continue;
+                        }
                         let prev_ok = j == 0 || prev == b' ' || prev == b'\t';
                         let next_ok = next == b' ' || next == b'\t' || next == 0;
                         if !prev_ok || !next_ok {
@@ -267,7 +276,11 @@ impl Rule for SpaceAroundOperators {
                             });
                         }
                     }
-                    _ => {}
+                    _ => {
+                        // Track paren depth to detect def parameter lists
+                        if b == b'(' { paren_depth += 1; }
+                        else if b == b')' { paren_depth -= 1; }
+                    }
                 }
 
                 j += 1;

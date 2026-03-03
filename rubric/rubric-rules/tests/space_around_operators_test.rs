@@ -120,3 +120,39 @@ fn no_violation_for_percent_r_regex_content() {
     let diags = SpaceAroundOperators.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations inside %r{{}} regex, got: {:?}", diags);
 }
+
+// ── False positive: === (case equality) operator with proper spacing ──────────
+#[test]
+fn no_false_positive_for_case_equality_operator_with_spaces() {
+    let src = "result = Integer === size\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "=== with spaces falsely flagged: {:?}", diags);
+}
+
+// ── True positive: === without spaces should be detected ─────────────────────
+#[test]
+fn detects_case_equality_operator_without_spaces() {
+    let src = "result = Integer===size\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(!diags.is_empty(), "Integer===size should be flagged");
+}
+
+// ── False positive: = in method parameter default (def foo(bar=nil)) ─────────
+#[test]
+fn no_false_positive_for_parameter_default() {
+    let src = "def foo(bar=nil)\n  bar\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "parameter default = falsely flagged: {:?}", diags);
+}
+
+// ── False positive: multiple parameter defaults ───────────────────────────────
+#[test]
+fn no_false_positive_for_multiple_parameter_defaults() {
+    let src = "def configure(host='localhost', port=8080, ssl=false)\n  [host, port, ssl]\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "multiple parameter defaults falsely flagged: {:?}", diags);
+}
