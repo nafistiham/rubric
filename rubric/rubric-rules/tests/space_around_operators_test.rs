@@ -103,6 +103,15 @@ fn no_violation_for_setter_method_call() {
     assert!(diags.is_empty(), "expected no violations for setter method call, got: {:?}", diags);
 }
 
+// ── False positive: symbol literals like `:+`, `:-` (e.g., `reduce(:+)`) ────
+#[test]
+fn no_violation_for_symbol_operator_literal() {
+    let src = "result = arr.reduce(:+)\nresult2 = arr.reduce(:-)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "symbol operator literals should not be flagged: {:?}", diags);
+}
+
 // ── False positive: %r{...} percent-regex content ────────────────────────────
 #[test]
 fn no_violation_for_percent_r_regex_content() {

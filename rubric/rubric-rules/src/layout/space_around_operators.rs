@@ -244,6 +244,11 @@ impl Rule for SpaceAroundOperators {
                             j += 1;
                             continue;
                         }
+                        // Skip symbol literals: `:+`, `:-`, `:*` (e.g., `reduce(:+)`)
+                        if prev == b':' {
+                            j += 1;
+                            continue;
+                        }
                         // Skip negative/positive number literals
                         let next = if j + 1 < len { bytes[j+1] } else { 0 };
                         if (b == b'-' || b == b'+') && next.is_ascii_digit() && prev != b' ' {
