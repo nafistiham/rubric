@@ -19,3 +19,12 @@ fn no_violation_on_clean() {
     let diags = FormatParameterMismatch.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations on clean code");
 }
+
+// Width/flag specifiers like `%09d` or `%-10s` must be recognized
+#[test]
+fn no_false_positive_for_width_flag_specifiers() {
+    let src = "format('%09d', rand(10**9)).gsub(/pattern/, 'repl')\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = FormatParameterMismatch.check_source(&ctx);
+    assert!(diags.is_empty(), "width-flag specifier %09d falsely flagged: {:?}", diags);
+}

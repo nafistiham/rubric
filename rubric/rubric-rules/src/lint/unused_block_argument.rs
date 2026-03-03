@@ -34,7 +34,8 @@ impl Rule for UnusedBlockArgument {
                         let params_str = &trimmed[pipe_open + 1..pipe_open + 1 + pipe_close];
                         let params: Vec<&str> = params_str
                             .split(',')
-                            .map(|s| s.trim())
+                            // Strip destructuring parens: `(value` → `value`, `index)` → `index`
+                            .map(|s| s.trim().trim_matches(|c: char| c == '(' || c == ')'))
                             .filter(|s| !s.is_empty())
                             .collect();
 

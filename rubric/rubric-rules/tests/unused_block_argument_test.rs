@@ -19,3 +19,21 @@ fn no_violation_on_clean() {
     let diags = UnusedBlockArgument.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations on clean code");
 }
+
+// Destructuring block params like `|sum, (value, index)|` — `(value` and
+// `index)` must not be treated as raw argument names
+#[test]
+fn no_false_positive_for_destructured_block_params() {
+    let src = concat!(
+        "control = code.chars.each_with_index.inject(0) do |sum, (value, index)|\n",
+        "  if (index + 1).even?\n",
+        "    sum + value.to_i\n",
+        "  else\n",
+        "    sum + algo(value.to_i)\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = UnusedBlockArgument.check_source(&ctx);
+    assert!(diags.is_empty(), "destructured params falsely flagged: {:?}", diags);
+}

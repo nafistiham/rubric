@@ -26,7 +26,21 @@ impl Rule for FormatParameterMismatch {
 
             if let Some(prefix) = call_start {
                 let args_str = &trimmed[prefix.len()..];
-                if let Some(paren_close) = args_str.rfind(')') {
+                // Find the matching `)` for the opening `(` at the start of args_str
+                // (rfind would pick the last `)` on the line, e.g. from `.gsub(...)`)
+                let paren_close = {
+                    let mut depth = 1usize;
+                    let mut found = None;
+                    for (k, b) in args_str.bytes().enumerate() {
+                        if b == b'(' { depth += 1; }
+                        else if b == b')' {
+                            depth -= 1;
+                            if depth == 0 { found = Some(k); break; }
+                        }
+                    }
+                    found
+                };
+                if let Some(paren_close) = paren_close {
                     let args_inner = &args_str[..paren_close];
 
                     // Find the format string (first argument)
@@ -85,10 +99,31 @@ fn count_format_specifiers(fmt: &str) -> usize {
     let mut i = 0;
     while i < n {
         if bytes[i] == b'%' && i + 1 < n {
-            let next = bytes[i + 1];
-            if matches!(next, b's' | b'd' | b'f' | b'i' | b'g' | b'e' | b'x' | b'o' | b'b' | b'p') {
+            let mut k = i + 1;
+            // Skip `%%` (literal percent)
+            if bytes[k] == b'%' {
+                i = k + 1;
+                continue;
+            }
+            // Skip optional flags: `-`, `+`, ` `, `#`, `0`
+            while k < n && matches!(bytes[k], b'-' | b'+' | b' ' | b'#' | b'0') {
+                k += 1;
+            }
+            // Skip optional width (digits)
+            while k < n && bytes[k].is_ascii_digit() {
+                k += 1;
+            }
+            // Skip optional .precision
+            if k < n && bytes[k] == b'.' {
+                k += 1;
+                while k < n && bytes[k].is_ascii_digit() {
+                    k += 1;
+                }
+            }
+            // Match conversion character
+            if k < n && matches!(bytes[k], b's' | b'd' | b'f' | b'i' | b'g' | b'e' | b'x' | b'X' | b'o' | b'b' | b'p' | b'a') {
                 count += 1;
-                i += 2;
+                i = k + 1;
                 continue;
             }
         }
