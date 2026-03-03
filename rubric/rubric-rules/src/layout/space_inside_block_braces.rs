@@ -37,30 +37,50 @@ impl Rule for SpaceInsideBlockBraces {
                     None => {}
                 }
 
-                // Skip %r{...} and other %r delimiters — regex literals
-                if b == b'%' && pos + 1 < n && bytes[pos + 1] == b'r' {
-                    pos += 2;
-                    if pos < n {
-                        let delim = bytes[pos];
-                        pos += 1;
-                        if delim == b'{' {
-                            let mut depth = 1usize;
-                            while pos < n && depth > 0 {
-                                match bytes[pos] {
-                                    b'\\' => { pos += 2; }
-                                    b'{' => { depth += 1; pos += 1; }
-                                    b'}' => { depth -= 1; pos += 1; }
-                                    _ => { pos += 1; }
+                // Skip percent literals that use `{` as delimiter.
+                // Handles: %r{}, %{}, %w{}, %i{}, %W{}, %I{}, %q{}, %Q{}
+                if b == b'%' && pos + 1 < n {
+                    let next_b = bytes[pos + 1];
+                    // Check for %r, %w, %i, %W, %I, %q, %Q followed by `{`,
+                    // or bare `%` followed directly by `{`.
+                    let (skip_tag_len, is_percent_brace) = match next_b {
+                        b'r' | b'w' | b'i' | b'W' | b'I' | b'q' | b'Q' => {
+                            // %X{ form
+                            if pos + 2 < n && bytes[pos + 2] == b'{' {
+                                (2usize, true)
+                            } else if pos + 2 < n {
+                                // %X with non-brace delimiter — skip as generic literal
+                                let delim = bytes[pos + 2];
+                                pos += 3;
+                                while pos < n && bytes[pos] != delim {
+                                    if bytes[pos] == b'\\' { pos += 2; } else { pos += 1; }
                                 }
+                                if pos < n { pos += 1; }
+                                continue;
+                            } else {
+                                (0, false)
                             }
-                        } else {
-                            while pos < n && bytes[pos] != delim {
-                                if bytes[pos] == b'\\' { pos += 2; } else { pos += 1; }
-                            }
-                            if pos < n { pos += 1; }
                         }
+                        b'{' => {
+                            // bare %{ form
+                            (1usize, true)
+                        }
+                        _ => (0, false),
+                    };
+
+                    if is_percent_brace {
+                        pos += skip_tag_len + 1; // skip `%`, optional letter(s), and `{`
+                        let mut depth = 1usize;
+                        while pos < n && depth > 0 {
+                            match bytes[pos] {
+                                b'\\' => { pos += 2; }
+                                b'{' => { depth += 1; pos += 1; }
+                                b'}' => { depth -= 1; pos += 1; }
+                                _ => { pos += 1; }
+                            }
+                        }
+                        continue;
                     }
-                    continue;
                 }
 
                 // Skip /regex/ literals
@@ -99,10 +119,31 @@ impl Rule for SpaceInsideBlockBraces {
                         }
                         found
                     };
-                    let is_hash = matches!(
-                        prev_nonspace,
-                        b'=' | b',' | b'(' | b'[' | b'{' | b':' | 0
-                    ) || pos == line.len() - line.trim_start().len();
+
+                    // Check if the preceding token is the keyword `in` (pattern matching).
+                    // Scan backwards past whitespace; if the preceding word is `in`, treat as hash.
+                    let preceded_by_in_keyword = {
+                        let mut p = pos;
+                        // skip whitespace before `{`
+                        while p > 0 && (bytes[p - 1] == b' ' || bytes[p - 1] == b'\t') {
+                            p -= 1;
+                        }
+                        // check if the two characters before the whitespace are `in`
+                        // and that they are not part of a longer word
+                        if p >= 2 && bytes[p - 2] == b'i' && bytes[p - 1] == b'n' {
+                            // ensure `in` is a standalone word (not e.g. `begin`)
+                            p - 2 == 0 || bytes[p - 3] == b' ' || bytes[p - 3] == b'\t'
+                        } else {
+                            false
+                        }
+                    };
+
+                    let is_hash = preceded_by_in_keyword
+                        || matches!(
+                            prev_nonspace,
+                            b'=' | b',' | b'(' | b'[' | b'{' | b':' | 0
+                        )
+                        || pos == line.len() - line.trim_start().len();
 
                     brace_kind_stack.push(!is_hash); // true = block
 

@@ -73,3 +73,67 @@ fn no_violation_for_percent_r_regex() {
     let diags = SpaceInsideBlockBraces.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations in %r{{}} regex, got: {:?}", diags);
 }
+
+// ── False positive: lambda body -> { } ──────────────────────────────────────
+// `-> {` opens a lambda body, not a block. Must not fire.
+#[test]
+fn no_false_positive_for_lambda_body() {
+    let src = "handler = -> { puts 'hi' }\nf = ->(x) { x * 2 }\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideBlockBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "lambda body falsely flagged: {:?}", diags);
+}
+
+// ── False positive: lambda as hash value ────────────────────────────────────
+// `->(cli) { cli.stop }` as hash value must not fire.
+#[test]
+fn no_false_positive_for_lambda_in_hash() {
+    let src = "HANDLERS = {\n  \"key\" => ->(cli) { cli.stop },\n}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideBlockBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "lambda in hash falsely flagged: {:?}", diags);
+}
+
+// ── False positive: percent string literals %{} ──────────────────────────────
+// `%{text}` is a string literal delimiter, not a block. Must not fire.
+#[test]
+fn no_false_positive_for_percent_string() {
+    let src = "msg = %{hello world}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideBlockBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "percent string falsely flagged: {:?}", diags);
+}
+
+// ── False positive: other percent literal forms ──────────────────────────────
+// `%w{a b}`, `%i{a b}`, `%W{a b}`, `%I{a b}`, `%q{text}`, `%Q{text}` must not fire.
+#[test]
+fn no_false_positive_for_percent_literals() {
+    let cases = [
+        "words = %w{foo bar baz}\n",
+        "syms  = %i{foo bar baz}\n",
+        "words = %W{foo bar baz}\n",
+        "syms  = %I{foo bar baz}\n",
+        "str   = %q{hello world}\n",
+        "str   = %Q{hello world}\n",
+    ];
+    for src in &cases {
+        let ctx = LintContext::new(Path::new("test.rb"), src);
+        let diags = SpaceInsideBlockBraces.check_source(&ctx);
+        assert!(
+            diags.is_empty(),
+            "percent literal {:?} falsely flagged: {:?}",
+            src,
+            diags
+        );
+    }
+}
+
+// ── False positive: pattern matching `in {type: :key}` ──────────────────────
+// Ruby 3.0+ pattern match hash pattern must not fire.
+#[test]
+fn no_false_positive_for_pattern_matching() {
+    let src = "case obj\nin {type: :key}\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideBlockBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "pattern matching falsely flagged: {:?}", diags);
+}
