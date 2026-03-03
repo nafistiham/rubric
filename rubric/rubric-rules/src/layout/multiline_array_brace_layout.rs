@@ -25,6 +25,15 @@ impl Rule for MultilineArrayBraceLayout {
                 // (the `]` is not alone on its line)
                 let closing_bracket_alone = trimmed == "]";
                 if !closing_bracket_alone {
+                    // Only flag when the trailing `]` closes a bracket from a PREVIOUS line.
+                    // If the line has as many `[` as `]`, the brackets are balanced on this
+                    // line (e.g. `urlsafe ? %w[- _] : %w[+ /]`) — skip.
+                    let open_count = trimmed.bytes().filter(|&b| b == b'[').count();
+                    let close_count = trimmed.bytes().filter(|&b| b == b']').count();
+                    if open_count >= close_count {
+                        continue;
+                    }
+
                     // Check if there's a matching `[` on a previous line (multiline)
                     let mut is_multiline = false;
                     let mut j = i;

@@ -19,3 +19,19 @@ fn no_violation_on_clean() {
     let diags = MultilineArrayBraceLayout.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations on clean code");
 }
+
+// Element ending with `]` from an inner %w[] literal should not be flagged
+// as the closing bracket of the outer multiline array
+#[test]
+fn no_false_positive_for_inner_percent_w_closing_bracket() {
+    let src = concat!(
+        "        char_range = [\n",
+        "          Array('0'..'9'),\n",
+        "          Array('a'..'z'),\n",
+        "          urlsafe ? %w[- _] : %w[+ /]\n",
+        "        ].flatten\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = MultilineArrayBraceLayout.check_source(&ctx);
+    assert!(diags.is_empty(), "inner %w[] bracket falsely flagged: {:?}", diags);
+}
