@@ -27,7 +27,19 @@ impl Rule for Void {
                 || t == "begin" || t.starts_with("require ")
                 || t.starts_with("rescue") || t.starts_with("ensure")
                 || t.starts_with("else") || t.starts_with("elsif ")
+                // `end % n` — chained method/operator on block result (not standalone void)
+                || t.starts_with("end ")
+                // String literal — implicit return value or format string (`'...' % args`)
+                || t.starts_with('\'') || t.starts_with('"')
             {
+                continue;
+            }
+
+            // Skip if the next non-empty, non-comment line is `end` — implicit return value
+            let next_code = ctx.lines[i+1..].iter()
+                .map(|l| l.trim())
+                .find(|l| !l.is_empty() && !l.starts_with('#'));
+            if next_code.map(|l| l == "end" || l.starts_with("end ") || l.starts_with("end.")).unwrap_or(false) {
                 continue;
             }
 
