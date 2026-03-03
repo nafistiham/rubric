@@ -58,6 +58,15 @@ fn no_false_positive_for_hash_or_default() {
     assert!(diags.is_empty(), "|| {{}} falsely flagged: {:?}", diags);
 }
 
+// ── False positive: empty lambda `->(val) {}` should not be flagged ──────────
+#[test]
+fn no_false_positive_for_empty_lambda() {
+    let src = "VALIDATORS = {\n  Integer => ->(val) {},\n  Float => ->(val) {},\n  String => ->(val) {},\n}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EmptyBlock.check_source(&ctx);
+    assert!(diags.is_empty(), "empty lambda ->(val) {{}} falsely flagged: {:?}", diags);
+}
+
 // ── True positive: empty block after method call should still be detected ──────
 #[test]
 fn still_detects_empty_block_after_method_call() {

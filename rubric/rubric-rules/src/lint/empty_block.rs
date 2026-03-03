@@ -49,9 +49,27 @@ impl Rule for EmptyBlock {
                             false
                         } else {
                             let prev = bytes[k as usize];
-                            if prev == b')' || prev == b']' {
-                                // After explicit args `foo(x) {}` or `arr[] {}` → block
+                            if prev == b']' {
+                                // After array subscript `arr[] {}` → block
                                 true
+                            } else if prev == b')' {
+                                // After args `foo(x) {}` → block, UNLESS it's a lambda `->(x) {}`
+                                // Scan backward to find matching `(` and check if `->` precedes it
+                                let mut paren_depth = 1i32;
+                                let mut m = k - 1;
+                                while m >= 0 && paren_depth > 0 {
+                                    let c = bytes[m as usize];
+                                    if c == b')' { paren_depth += 1; }
+                                    else if c == b'(' { paren_depth -= 1; }
+                                    m -= 1;
+                                }
+                                // m now points to char before `(`, skip spaces
+                                while m >= 0 && bytes[m as usize] == b' ' { m -= 1; }
+                                // If `->` precedes the arg list, it's a lambda body → not a block
+                                let is_lambda = m >= 1
+                                    && bytes[m as usize] == b'>'
+                                    && bytes[(m - 1) as usize] == b'-';
+                                !is_lambda
                             } else if prev.is_ascii_alphanumeric() || prev == b'_' || prev == b'?' {
                                 // Word char: extract word and check if it's a keyword
                                 let word_end = k as usize;
