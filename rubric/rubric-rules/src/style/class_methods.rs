@@ -3,10 +3,10 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 pub struct ClassMethods;
 
 /// Scope kind pushed onto the context stack.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone)]
 enum Scope {
-    Class,
-    Module,
+    /// A named `class Foo` or `module Foo` scope, storing the simple name.
+    Named(String),
     /// Any other block/def/do that contributes an `end` but is not class/module.
     Other,
 }
@@ -18,7 +18,7 @@ impl Rule for ClassMethods {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        // Stack tracking the innermost class/module/other scope.
+        // Stack tracking scopes that each need a matching `end`.
         let mut scope_stack: Vec<Scope> = Vec::new();
 
         for (i, line) in ctx.lines.iter().enumerate() {
@@ -29,48 +29,49 @@ impl Rule for ClassMethods {
                 continue;
             }
 
-            // Detect scope-opening keywords. We check the start of the
-            // trimmed line so we don't fire on variable names like `classes`.
-            //
-            // We intentionally ignore single-line forms like `class Foo; end`
-            // and `module Foo; end` (treating them as openers that expect a
-            // later `end`) — these are rare in real code and skipping them
-            // avoids the complexity of on-the-fly `end`-counting within a line.
-            if is_class_opener(trimmed) {
-                scope_stack.push(Scope::Class);
-            } else if is_module_opener(trimmed) {
-                scope_stack.push(Scope::Module);
+            // Detect scope-opening keywords.
+            if let Some(name) = extract_class_or_module_name(trimmed) {
+                scope_stack.push(Scope::Named(name));
             } else if is_other_block_opener(trimmed) {
                 scope_stack.push(Scope::Other);
             }
 
-            // Detect def self.method lines.
-            if trimmed.starts_with("def self.") {
-                // Only flag when the immediately enclosing scope is a module.
-                let innermost = scope_stack.last().copied();
-                if innermost == Some(Scope::Module) {
-                    let indent = line.len() - trimmed.len();
-                    let line_start = ctx.line_start_offsets[i] as usize;
-                    let pos = (line_start + indent) as u32;
-                    diags.push(Diagnostic {
-                        rule: self.name(),
-                        message: "Use `module_function` or `extend self` instead of `def self.method_name` inside a module.".into(),
-                        range: TextRange::new(pos, pos + trimmed.len() as u32),
-                        severity: Severity::Warning,
-                    });
+            // Detect `def ReceiverName.method_name` lines.
+            // We look for `def ` followed by an uppercase-starting identifier, a dot, then
+            // a method name.  When the receiver name exactly matches the immediately enclosing
+            // named scope (class or module), we flag it.
+            if let Some(receiver) = extract_named_def_receiver(trimmed) {
+                let innermost_name = scope_stack.iter().rev().find_map(|s| match s {
+                    Scope::Named(n) => Some(n.as_str()),
+                    Scope::Other => None,
+                });
+                if let Some(enc_name) = innermost_name {
+                    if receiver == enc_name {
+                        let indent = line.len() - trimmed.len();
+                        let line_start = ctx.line_start_offsets[i] as usize;
+                        let pos = (line_start + indent) as u32;
+                        diags.push(Diagnostic {
+                            rule: self.name(),
+                            message: format!(
+                                "Use `self.{}` instead of `{}.{}`.",
+                                extract_method_name_after_dot(trimmed),
+                                receiver,
+                                extract_method_name_after_dot(trimmed),
+                            ),
+                            range: TextRange::new(pos, pos + trimmed.len() as u32),
+                            severity: Severity::Warning,
+                        });
+                    }
                 }
 
-                // `def self.method` opens a method body — push Other so the
-                // matching `end` will pop it correctly.
+                // `def ReceiverName.method` opens a method body — push Other.
                 scope_stack.push(Scope::Other);
-            } else if is_def_opener(trimmed) {
-                // Plain `def method` — also opens a body.
+            } else if is_def_self_opener(trimmed) || is_plain_def_opener(trimmed) {
+                // `def self.method` or `def method` — opens a body.
                 scope_stack.push(Scope::Other);
             }
 
             // Detect `end` — pops the innermost scope.
-            // We match lines that are exactly `end` (possibly followed by
-            // comment) and lines like `end; foo` which are unusual but valid.
             if is_end_line(trimmed) {
                 scope_stack.pop();
             }
@@ -80,43 +81,117 @@ impl Rule for ClassMethods {
     }
 }
 
-/// Returns true if the trimmed line opens a class body.
-/// Matches: `class Foo`, `class Foo < Bar`, `class << self`
-fn is_class_opener(trimmed: &str) -> bool {
-    if !trimmed.starts_with("class") {
-        return false;
+/// If the trimmed line is a `class` or `module` opener, return the simple name
+/// (the identifier immediately after the keyword, stripping any `::Namespace` prefix
+/// and any inheritance `< SuperClass`).
+///
+/// Examples:
+///   "class Foo"            => Some("Foo")
+///   "class Foo < Bar"      => Some("Foo")
+///   "class Foo::Bar"       => Some("Foo::Bar")  — keep full compound name
+///   "module Foo"           => Some("Foo")
+///   "module Foo::Bar"      => Some("Foo::Bar")
+///   "class << self"        => None  (singleton class — no named scope)
+fn extract_class_or_module_name(trimmed: &str) -> Option<String> {
+    let rest = if trimmed.starts_with("class ") {
+        &trimmed["class ".len()..]
+    } else if trimmed.starts_with("module ") {
+        &trimmed["module ".len()..]
+    } else {
+        return None;
+    };
+
+    // `class << self` is a singleton-class opener, not a named scope.
+    if rest.starts_with('<') {
+        return None;
     }
-    let after = &trimmed["class".len()..];
-    // Must be followed by whitespace or `<` (for `class << self`)
-    after.starts_with(|c: char| c.is_whitespace() || c == '<')
+
+    // The name ends at whitespace (e.g. before `< SuperClass`) or at `#` (comment) or end.
+    let name_end = rest
+        .find(|c: char| c.is_whitespace() || c == '#' || c == ';')
+        .unwrap_or(rest.len());
+    let name = &rest[..name_end];
+
+    if name.is_empty() {
+        return None;
+    }
+
+    Some(name.to_owned())
 }
 
-/// Returns true if the trimmed line opens a module body.
-/// Matches: `module Foo`, `module Foo::Bar`
-fn is_module_opener(trimmed: &str) -> bool {
-    if !trimmed.starts_with("module") {
-        return false;
+/// Extract the receiver name from a `def ReceiverName.method_name(...)` line.
+/// Returns `Some(receiver)` only when the receiver starts with an uppercase letter
+/// (i.e. it looks like a constant/class name, not `self`).
+///
+/// Returns `None` for `def self.method`, `def method`, etc.
+fn extract_named_def_receiver(trimmed: &str) -> Option<String> {
+    // Must start with `def `.
+    let rest = trimmed.strip_prefix("def ")?;
+
+    // Skip `self.` — that is idiomatic Ruby, not flagged.
+    if rest.starts_with("self.") {
+        return None;
     }
-    let after = &trimmed["module".len()..];
-    after.starts_with(|c: char| c.is_whitespace())
+
+    // Find the dot — must have one for a named receiver def.
+    let dot_pos = rest.find('.')?;
+    let receiver = &rest[..dot_pos];
+
+    // Receiver must be a constant-like name: starts with uppercase letter and
+    // contains only word chars, colons (for `Foo::Bar`), etc.
+    if receiver.is_empty() {
+        return None;
+    }
+    let first_char = receiver.chars().next()?;
+    if !first_char.is_uppercase() {
+        return None;
+    }
+
+    Some(receiver.to_owned())
 }
 
-/// Returns true if the trimmed line is a plain `def` (not `def self.`).
-fn is_def_opener(trimmed: &str) -> bool {
+/// Extract the method name that appears after the dot in `def ReceiverName.method_name(...)`.
+/// Used purely for the diagnostic message.
+fn extract_method_name_after_dot(trimmed: &str) -> &str {
+    // Strip `def `.
+    let rest = trimmed.strip_prefix("def ").unwrap_or(trimmed);
+    if let Some(dot_pos) = rest.find('.') {
+        let after_dot = &rest[dot_pos + 1..];
+        // Method name ends at `(`, ` `, `;`, end.
+        let end = after_dot
+            .find(|c: char| c == '(' || c.is_whitespace() || c == ';')
+            .unwrap_or(after_dot.len());
+        &after_dot[..end]
+    } else {
+        rest
+    }
+}
+
+/// Returns true if the trimmed line is `def self.method_name...`.
+fn is_def_self_opener(trimmed: &str) -> bool {
+    trimmed.starts_with("def self.")
+}
+
+/// Returns true if the trimmed line is a plain `def method` (not `def self.` or `def Name.`).
+fn is_plain_def_opener(trimmed: &str) -> bool {
     if !trimmed.starts_with("def ") && trimmed != "def" {
         return false;
     }
-    // Exclude `def self.` — that case is handled separately above.
-    !trimmed.starts_with("def self.")
+    // Exclude `def self.` and `def Name.` — those are handled separately.
+    if trimmed.starts_with("def self.") {
+        return false;
+    }
+    if let Some(rest) = trimmed.strip_prefix("def ") {
+        if rest.contains('.') {
+            return false;
+        }
+    }
+    true
 }
 
 /// Returns true if the trimmed line introduces a block that will need an `end`.
-/// Covers: `do`, `if/unless/while/until/for/begin` on their own line,
-/// `do |...| ... end` single-line is intentionally excluded.
 fn is_other_block_opener(trimmed: &str) -> bool {
-    // We intentionally keep this minimal so we don't accidentally mis-count.
-    // The critical ones are keywords that always have a matching `end`:
-    for kw in &["do", "begin", "if ", "unless ", "while ", "until ", "for ", "case "] {
+    for kw in &["begin", "if ", "unless ", "while ", "until ", "for ", "case "] {
         if trimmed.starts_with(kw) {
             return true;
         }
@@ -126,24 +201,10 @@ fn is_other_block_opener(trimmed: &str) -> bool {
         return true;
     }
     // Trailing `begin` at end of line (e.g. `@@x ||= begin`).
-    // This covers Ruby's inline begin..end expression form where `begin` appears
-    // as the last token on a line rather than at the start.  Without this check
-    // the matching `end` is consumed by the wrong scope entry and the stack
-    // falls out of sync, causing subsequent `def self.method` inside the same
-    // class to be mis-flagged as if they were inside a module.
     if trimmed.ends_with(" begin") {
         return true;
     }
     // Assignment-expression openers: `var = if ...`, `var = case ...`, `var = unless ...`.
-    // Ruby allows `if`, `case`, and `unless` as rvalue expressions:
-    //   result = if condition
-    //     ...
-    //   end
-    // The `if`/`case`/`unless` keyword does NOT appear at the start of the trimmed line
-    // (it appears after `=`), so the leading-keyword checks above do not fire.  However
-    // the multi-line block still has a bare `end` on its own line.  If we do not push an
-    // `Other` scope for it that `end` will pop the wrong entry and desynchronise the
-    // stack, causing subsequent `def self.method` lines to be incorrectly flagged.
     for kw in &["= if ", "= unless ", "= case "] {
         if trimmed.contains(kw) {
             return true;

@@ -4,6 +4,7 @@ use std::path::Path;
 
 const OFFENDING: &str = include_str!("fixtures/style/class_methods/offending.rb");
 
+// Basic detection: def ClassName.method_name inside class body must be flagged.
 #[test]
 fn detects_violation() {
     let ctx = LintContext::new(Path::new("test.rb"), OFFENDING);
@@ -12,44 +13,115 @@ fn detects_violation() {
     assert!(diags.iter().all(|d| d.rule == "Style/ClassMethods"));
 }
 
+// `def self.bar` is correct style — must NOT be flagged.
 #[test]
-fn no_violation_on_clean() {
-    let src = "class Foo\n  class << self\n    def bar\n      'bar'\n    end\n  end\nend\n";
-    let ctx = LintContext::new(Path::new("test.rb"), src);
-    let diags = ClassMethods.check_source(&ctx);
-    assert!(diags.is_empty(), "expected no violations on clean code");
-}
-
-// RuboCop's Style/ClassMethods only flags def self.method inside a module body.
-// def self.method inside a class body is perfectly idiomatic and must NOT be flagged.
-#[test]
-fn no_false_positive_for_class_method_in_class() {
-    let src = "class DeviseController < ApplicationController\n  def self.internal_methods\n    super << :_prefixes\n  end\nend\n";
+fn no_violation_for_def_self_in_class() {
+    let src = "class Foo\n  def self.bar\n    'bar'\n  end\nend\n";
     let ctx = LintContext::new(Path::new("test.rb"), src);
     let diags = ClassMethods.check_source(&ctx);
     assert!(
         diags.is_empty(),
-        "def self.method inside a class body must NOT be flagged, but got: {:?}",
+        "def self.method inside a class must NOT be flagged, but got: {:?}",
         diags
     );
 }
 
-// def self.method inside a module body must be flagged.
+// `def self.bar` inside a module must NOT be flagged — that is correct Ruby style.
+// (Style/ModuleFunction is a separate cop.)
 #[test]
-fn still_detects_class_method_in_module() {
+fn no_violation_for_def_self_in_module() {
     let src = "module Foo\n  def self.bar\n    'bar'\n  end\nend\n";
     let ctx = LintContext::new(Path::new("test.rb"), src);
     let diags = ClassMethods.check_source(&ctx);
     assert!(
+        diags.is_empty(),
+        "def self.method inside a module must NOT be flagged by ClassMethods, but got: {:?}",
+        diags
+    );
+}
+
+// def ClassName.method inside the matching class must be flagged.
+#[test]
+fn flags_class_name_receiver_in_class() {
+    let src = "class MyClass\n  def MyClass.do_thing\n    true\n  end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
         !diags.is_empty(),
-        "def self.method inside a module body must be flagged"
+        "def MyClass.method inside class MyClass must be flagged"
     );
     assert!(diags.iter().all(|d| d.rule == "Style/ClassMethods"));
 }
 
-// def self.method at the top level (no class/module context) must NOT be flagged.
+// def ModuleName.method inside the matching module must be flagged.
 #[test]
-fn no_false_positive_for_top_level_class_method() {
+fn flags_module_name_receiver_in_module() {
+    let src = "module Helpers\n  def Helpers.util\n    42\n  end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
+        !diags.is_empty(),
+        "def Helpers.util inside module Helpers must be flagged"
+    );
+    assert!(diags.iter().all(|d| d.rule == "Style/ClassMethods"));
+}
+
+// def OtherName.method — receiver doesn't match enclosing class — must NOT be flagged.
+#[test]
+fn no_false_positive_for_unrelated_name_receiver() {
+    let src = "class Foo\n  def Bar.baz\n    'baz'\n  end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "def Bar.baz inside class Foo must NOT be flagged (receiver doesn't match), but got: {:?}",
+        diags
+    );
+}
+
+// Top-level def ClassName.method with no enclosing class — must NOT be flagged.
+#[test]
+fn no_false_positive_for_top_level_named_def() {
+    let src = "def Foo.bar\n  42\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "def Foo.bar at top level (no enclosing class) must NOT be flagged, but got: {:?}",
+        diags
+    );
+}
+
+// Nested: def InnerClass.method inside InnerClass nested in a module — must be flagged.
+#[test]
+fn flags_inner_class_name_receiver_nested_in_module() {
+    let src = "module Outer\n  class Inner\n    def Inner.helper\n      true\n    end\n  end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
+        !diags.is_empty(),
+        "def Inner.helper inside class Inner must be flagged"
+    );
+    assert!(diags.iter().all(|d| d.rule == "Style/ClassMethods"));
+}
+
+// Nested: def OuterModule.method inside InnerClass — must NOT be flagged (receiver is not
+// the immediately enclosing class/module).
+#[test]
+fn no_false_positive_for_outer_name_receiver_inside_nested_class() {
+    let src = "module Outer\n  class Inner\n    def Outer.helper\n      true\n    end\n  end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "def Outer.helper inside class Inner must NOT be flagged (Outer is not the innermost scope), but got: {:?}",
+        diags
+    );
+}
+
+// def self.method at top level (no class/module context) must NOT be flagged.
+#[test]
+fn no_false_positive_for_top_level_def_self() {
     let src = "def self.top_level\n  42\nend\n";
     let ctx = LintContext::new(Path::new("test.rb"), src);
     let diags = ClassMethods.check_source(&ctx);
@@ -60,41 +132,52 @@ fn no_false_positive_for_top_level_class_method() {
     );
 }
 
-// Nested: def self.method inside a class that is nested inside a module must NOT flag.
+// class << self block is not a class/module scope opener — defs inside it are NOT flagged.
 #[test]
-fn no_false_positive_for_class_nested_in_module() {
-    let src = "module MyMod\n  class MyClass\n    def self.helper\n      true\n    end\n  end\nend\n";
+fn no_violation_on_class_shovel_self() {
+    let src = "class Foo\n  class << self\n    def bar\n      'bar'\n    end\n  end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(diags.is_empty(), "class << self block must not produce violations");
+}
+
+// class Foo < Bar — class with inheritance — should still detect flagged defs.
+#[test]
+fn flags_class_name_receiver_with_inheritance() {
+    let src = "class Foo < Bar\n  def Foo.build\n    new\n  end\nend\n";
     let ctx = LintContext::new(Path::new("test.rb"), src);
     let diags = ClassMethods.check_source(&ctx);
     assert!(
-        diags.is_empty(),
-        "def self.method inside a class (even nested in a module) must NOT be flagged, but got: {:?}",
-        diags
+        !diags.is_empty(),
+        "def Foo.build inside class Foo < Bar must be flagged"
     );
 }
 
-// A class method that uses a trailing `begin..end` block (e.g. `@@x ||= begin ... end`)
-// must not cause the scope tracker to desync and flag subsequent def self.methods in the
-// same class as violations.
-//
-// Root cause: `@@day ||= begin` does not start with `begin`, so is_other_block_opener
-// returns false and the begin block is not pushed onto the scope stack. The end that
-// closes the begin block then pops the scope for def self.day instead, and the end that
-// closes def self.day pops the enclosing Class scope. Everything that follows then sees
-// Module as the innermost scope and is incorrectly flagged.
+// def ClassName.method inside a module that is nested inside a class — must be flagged
+// if the receiver matches the innermost module name.
 #[test]
-fn no_false_positive_for_class_method_after_inline_begin() {
+fn flags_module_name_receiver_nested_in_class() {
+    let src = "class Outer\n  module Utils\n    def Utils.helper\n      true\n    end\n  end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
+        !diags.is_empty(),
+        "def Utils.helper inside module Utils must be flagged"
+    );
+}
+
+// Sidekiq pattern: def self.method at top level of a module — NOT flagged by ClassMethods.
+// (These were false positives in the old implementation.)
+#[test]
+fn no_false_positive_for_sidekiq_module_self_methods() {
     let src = concat!(
-        "module Outer\n",
-        "  class CLI\n",
-        "    def self.day\n",
-        "      @@day ||= begin\n",
-        "        42\n",
-        "      end\n",
-        "    end\n",
-        "    def self.r\n",
-        "      'red'\n",
-        "    end\n",
+        "module Sidekiq\n",
+        "  def self.server?\n",
+        "    defined?(Sidekiq::CLI)\n",
+        "  end\n",
+        "\n",
+        "  def self.redis_pool\n",
+        "    Thread.current[:pool]\n",
         "  end\n",
         "end\n",
     );
@@ -102,66 +185,22 @@ fn no_false_positive_for_class_method_after_inline_begin() {
     let diags = ClassMethods.check_source(&ctx);
     assert!(
         diags.is_empty(),
-        "def self.method after inline begin..end in a class must NOT be flagged, but got: {:?}",
+        "def self.method inside a module must NOT be flagged by ClassMethods, but got: {:?}",
         diags
     );
 }
 
-// def self.method inside an `included do` block must NOT be flagged, even when the
-// method body contains an assignment-expression `result = if condition ... end`.
-//
-// Root cause: `result = if condition` does not start with `if `, so is_other_block_opener
-// returned false and the inline-if block was not pushed onto the scope stack. The bare
-// `end` that closes the multi-line if expression then pops the scope for the surrounding
-// `def self.method` instead, leaving the `included do` scope as innermost for the next
-// `def self.` line — which is then falsely flagged as a module-level violation.
+// Devise pattern: def self.method inside a module nested in another module — NOT flagged.
 #[test]
-fn no_false_positive_for_def_self_after_assignment_if_in_included_block() {
+fn no_false_positive_for_devise_nested_module_self_methods() {
     let src = concat!(
-        "module User::PamAuthenticable\n",
-        "  extend ActiveSupport::Concern\n",
-        "\n",
-        "  included do\n",
-        "    def self.pam_get_user(attributes = {})\n",
-        "      resource = if attributes[:email]\n",
-        "                   find_by(email: attributes[:email])\n",
-        "                 else\n",
-        "                   nil\n",
-        "                 end\n",
-        "      resource\n",
+        "module Devise\n",
+        "  module Encryptor\n",
+        "    def self.digest(klass, password)\n",
+        "      password\n",
         "    end\n",
         "\n",
-        "    def self.authenticate_with_pam(attributes = {})\n",
-        "      super\n",
-        "    end\n",
-        "  end\n",
-        "end\n",
-    );
-    let ctx = LintContext::new(Path::new("test.rb"), src);
-    let diags = ClassMethods.check_source(&ctx);
-    assert!(
-        diags.is_empty(),
-        "def self.method inside an included do block must NOT be flagged even after assignment-if, but got: {:?}",
-        diags
-    );
-}
-
-// Variant: `result = case expr ... end` inside a method body must not desync the scope
-// stack and cause a subsequent `def self.` at the same nesting level to be falsely flagged.
-#[test]
-fn no_false_positive_for_def_self_after_assignment_case_in_included_block() {
-    let src = concat!(
-        "module Helpers\n",
-        "  included do\n",
-        "    def handle(val)\n",
-        "      result = case val\n",
-        "               when :a then 1\n",
-        "               when :b then 2\n",
-        "               end\n",
-        "      result\n",
-        "    end\n",
-        "\n",
-        "    def self.setup!\n",
+        "    def self.compare(klass, hashed, password)\n",
         "      true\n",
         "    end\n",
         "  end\n",
@@ -171,7 +210,57 @@ fn no_false_positive_for_def_self_after_assignment_case_in_included_block() {
     let diags = ClassMethods.check_source(&ctx);
     assert!(
         diags.is_empty(),
-        "def self.method inside an included do block must NOT be flagged after assignment-case, but got: {:?}",
+        "def self.method inside nested modules must NOT be flagged, but got: {:?}",
+        diags
+    );
+}
+
+// Sidekiq tui/tabs pattern: def self.method inside a module nested in a class — NOT flagged.
+#[test]
+fn no_false_positive_for_module_in_class_def_self_methods() {
+    let src = concat!(
+        "module Sidekiq\n",
+        "  class TUI\n",
+        "    module Tabs\n",
+        "      def self.all\n",
+        "        @all ||= []\n",
+        "      end\n",
+        "\n",
+        "      def self.current\n",
+        "        @current ||= all.first\n",
+        "      end\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "def self.method inside module nested in class must NOT be flagged, but got: {:?}",
+        diags
+    );
+}
+
+// Mastodon pattern: def self.method at top level of a module — NOT flagged.
+#[test]
+fn no_false_positive_for_mastodon_trends_module() {
+    let src = concat!(
+        "module Trends\n",
+        "  def self.table_name_prefix\n",
+        "    'trends_'\n",
+        "  end\n",
+        "\n",
+        "  def self.links\n",
+        "    @links ||= Trends::Links.new\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "def self.method inside a module must NOT be flagged by ClassMethods, but got: {:?}",
         diags
     );
 }

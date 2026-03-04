@@ -1,9 +1,9 @@
-module Foo
-  def self.bar
+class Foo
+  def Foo.bar
     'bar'
   end
 
-  def self.baz(x)
+  def Foo.baz(x)
     x + 1
   end
 end
