@@ -7,6 +7,12 @@ impl Rule for ReturnNil {
         "Style/ReturnNil"
     }
 
+    // RuboCop ships Style/ReturnNil with `Enabled: false`. Match that default
+    // so rubric does not flag it unless the user opts in via rubric.toml.
+    fn default_enabled(&self) -> bool {
+        false
+    }
+
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let src = ctx.source;

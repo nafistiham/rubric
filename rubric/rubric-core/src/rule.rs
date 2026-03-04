@@ -34,6 +34,16 @@ pub trait Rule: Send + Sync {
         vec![]
     }
 
+    /// Whether this rule is enabled by default (i.e. without any config).
+    ///
+    /// Override and return `false` for cops that RuboCop ships with
+    /// `Enabled: false` in its default configuration — e.g. `Style/Send`,
+    /// `Style/ReturnNil`. Such rules are skipped unless the user explicitly
+    /// sets `enabled = true` in `rubric.toml`.
+    fn default_enabled(&self) -> bool {
+        true
+    }
+
     /// Produce a fix for the given diagnostic.
     /// Returns `None` if this rule has no auto-fix.
     fn fix(&self, _diag: &Diagnostic) -> Option<Fix> {

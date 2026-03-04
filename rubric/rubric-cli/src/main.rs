@@ -116,7 +116,19 @@ fn apply_safe_fixes(
 fn build_rules_with_config(config: &Config) -> Vec<Box<dyn Rule + Send + Sync>> {
     build_rules()
         .into_iter()
-        .filter(|r| config.is_rule_enabled(r.name()))
+        .filter(|r| {
+            // If the rule is explicitly listed in the config, that wins.
+            if let Some(rule_cfg) = config.rules.get(r.name()) {
+                return rule_cfg.enabled;
+            }
+            // When disabled_by_default is set, unlisted rules are all off.
+            if config.linter.disabled_by_default {
+                return false;
+            }
+            // Otherwise fall back to the rule's own default (allows cops that
+            // RuboCop ships disabled to stay off unless the user opts in).
+            r.default_enabled()
+        })
         .collect()
 }
 
