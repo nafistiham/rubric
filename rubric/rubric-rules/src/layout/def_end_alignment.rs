@@ -151,7 +151,20 @@ impl Rule for DefEndAlignment {
                 stack.push((i, indent, false));
             }
 
-            if t == "end" || t.starts_with("end ") || t.starts_with("end.") {
+            // Match `end` followed by end-of-string or any non-identifier character
+            // (covers `end`, `end,`, `end)`, `end]`, `end.`, `end `, etc.).
+            // This mirrors the pattern in rescue_ensure_alignment.rs to prevent
+            // `end,` / `end)` (do-block endings inside argument lists) from
+            // leaving orphan frames on the stack and corrupting alignment checks.
+            let is_end_token = t == "end"
+                || (t.starts_with("end") && {
+                    match t.as_bytes().get(3).copied() {
+                        Some(c) => !c.is_ascii_alphanumeric() && c != b'_',
+                        None => false,
+                    }
+                });
+
+            if is_end_token {
                 if let Some((_def_line, expected_indent, is_def)) = stack.pop() {
                     if is_def && indent != expected_indent {
                         let line_start = ctx.line_start_offsets[i] as usize;

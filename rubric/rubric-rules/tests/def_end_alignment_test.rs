@@ -240,3 +240,85 @@ fn no_false_positive_for_inline_if_with_nested_inline_begin() {
     let diags = DefEndAlignment.check_source(&ctx);
     assert!(diags.is_empty(), "nested inline begin in inline if falsely flagged: {:?}", diags);
 }
+
+// ── False positive: `end,` (do-block end inside method argument list) ─────────
+// Mirrors mastodon/app/helpers/formatting_helper.rb pattern
+#[test]
+fn no_false_positive_for_do_block_end_comma_in_method_args() {
+    // The `end,` closes the do-block passed as the first arg to safe_join.
+    // The def's own `end` is at indent 2, matching the def at indent 2.
+    let src = concat!(
+        "class FormattingHelper\n",
+        "  def poll_option_tags(status)\n",
+        "    safe_join(\n",
+        "      status.options.map do |option|\n",
+        "        option\n",
+        "      end,\n",       // end, — do-block end inside argument list
+        "      tag.br\n",
+        "    )\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "end, inside method args falsely flagged: {:?}", diags);
+}
+
+// ── False positive: `end)` (do-block end closes a method call group) ──────────
+#[test]
+fn no_false_positive_for_do_block_end_paren_in_method_args() {
+    // `end)` closes the do-block AND the enclosing method call parens.
+    let src = concat!(
+        "class Foo\n",
+        "  def bar\n",
+        "    result = arr.map(items.each do |x|\n",
+        "      x * 2\n",
+        "    end)\n",       // end) — do-block end that also closes parens
+        "    result\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "end) inside method args falsely flagged: {:?}", diags);
+}
+
+// ── False positive: multiple `end,` inside one def — stack must stay correct ──
+#[test]
+fn no_false_positive_for_multiple_do_block_end_comma() {
+    let src = concat!(
+        "module M\n",
+        "  def foo\n",
+        "    safe_join(\n",
+        "      a.map do |x|\n",
+        "        x\n",
+        "      end,\n",
+        "      b.map do |y|\n",
+        "        y\n",
+        "      end,\n",
+        "      tag.br\n",
+        "    )\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "multiple end, inside method args falsely flagged: {:?}", diags);
+}
+
+// ── Real misalignment must still be detected after `end,` patterns ────────────
+#[test]
+fn still_detects_misalignment_after_do_block_end_comma() {
+    // The def is at indent 0 but its end is at indent 2 — that's a real violation.
+    let src = concat!(
+        "def foo\n",
+        "  a.map do |x|\n",
+        "    x\n",
+        "  end,\n",     // end, for the do-block — should NOT be flagged
+        "  x\n",
+        "  end\n",      // misaligned: def at 0, end at 2
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(!diags.is_empty(), "expected violation for misaligned def end after end,, got none");
+}
