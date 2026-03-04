@@ -50,3 +50,83 @@ fn still_detects_block_negated_if() {
     let diags = NegatedIf.check_source(&ctx);
     assert!(!diags.is_empty(), "block-form `if !` should still be flagged");
 }
+
+// ── Compound conditions must NOT be flagged ───────────────────────────────────
+// RuboCop's NegatedIf only flags a SINGLE negated condition. When `!` is
+// combined with `&&` or `||`, the compound expression cannot be simply negated
+// with `unless`, so RuboCop leaves it alone.
+#[test]
+fn no_violation_for_block_compound_and_condition() {
+    // `if !done && count > 0` — compound: first operand negated but joined with &&
+    let src = "if !done && count > 0\n  work\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NegatedIf.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "block-form `if !x && y` should not be flagged (compound condition), got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_violation_for_block_compound_or_condition() {
+    // `if !capsules || other` — compound with ||
+    let src = "if !capsules || fallback\n  use_fallback\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NegatedIf.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "block-form `if !x || y` should not be flagged (compound condition), got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_violation_for_modifier_compound_and_condition() {
+    // `expr if !global && !other` — modifier form with compound condition
+    let src = "location = root + location if !global && !location.start_with?(root)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NegatedIf.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "modifier `if !x && y` should not be flagged (compound condition), got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_violation_for_modifier_compound_or_condition() {
+    // `return if !ids || ids.empty?` — modifier form with || compound
+    let src = "return if !ids || ids.empty?\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NegatedIf.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "modifier `if !x || y` should not be flagged (compound condition), got: {:?}",
+        diags
+    );
+}
+
+// ── Single negation is still flagged after compound exemption ─────────────────
+#[test]
+fn still_detects_single_block_negated_if_after_compound_fix() {
+    // `if !job.has_key?(key)` — single negation, still a violation
+    let src = "if !job.has_key?(key)\n  fill_in_default\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NegatedIf.check_source(&ctx);
+    assert!(!diags.is_empty(), "block-form `if !single_cond` should still be flagged");
+}
+
+#[test]
+fn no_violation_for_block_multiline_compound_trailing_or() {
+    // `if !File.exist?(path) ||` — trailing `||` means condition continues on
+    // the next line. This is compound and must not be flagged.
+    let src = "if !File.exist?(path) ||\n    (File.directory?(path))\n  warn 'bad'\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NegatedIf.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "block-form `if !x ||` (trailing operator, multiline compound) should not be flagged, got: {:?}",
+        diags
+    );
+}
