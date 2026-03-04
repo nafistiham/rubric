@@ -15,30 +15,175 @@ fn is_flow_control_rhs(rest: &str) -> bool {
     })
 }
 
-/// Returns true if `pos` is inside a string literal on `line`.
-/// Handles `"..."` and `'...'` with backslash escapes. Stops at `#` outside strings (comment).
-fn pos_in_string(line: &[u8], pos: usize) -> bool {
-    let mut in_str: Option<u8> = None;
+/// Lexical context at a given byte position on a line.
+#[derive(PartialEq)]
+enum PosContext {
+    /// Plain code — the position may contain `and`/`or` as keywords.
+    Code,
+    /// Inside a string, regex, percent-literal, or comment — skip.
+    NonCode,
+}
+
+/// Scan `line` up to (but not including) `pos` and return whether that
+/// position is inside code or a non-code region (string, regex literal,
+/// percent literal, or inline comment).
+///
+/// Handles:
+///   - Double- and single-quoted strings with backslash escapes.
+///   - Regex literals `/pattern/` with a simple heuristic: a `/` that
+///     follows an operator-like character (`=`, `(`, `,`, `[`, `{`,
+///     whitespace at line start, `!`, `~`, `&`, `|`, `<`, `>`) opens a
+///     regex.  A `/` that follows a word character closes/divides.
+///   - Percent literals `%q(...)`, `%Q(...)`, `%(...)`, `%w[...]`,
+///     `%i[...]`, `%r{...}`, `%x(...)`, `%<...>` (any bracket pair).
+///   - Inline comments: a bare `#` outside any string/literal stops code.
+fn pos_context(line: &[u8], pos: usize) -> PosContext {
+    #[derive(Clone, Copy)]
+    enum State {
+        Code,
+        InDoubleStr,
+        InSingleStr,
+        InRegex,
+        InPercent(u8, u8), // open_char, close_char — depth tracked separately
+        InComment,
+    }
+
+    let mut state = State::Code;
+    let mut percent_depth: u32 = 0;
     let mut i = 0;
-    while i < pos && i < line.len() {
-        match in_str {
-            Some(_) if line[i] == b'\\' => {
-                i += 2;
-                continue;
+    let lim = pos.min(line.len());
+
+    // Track what the last non-whitespace byte was (for regex heuristic).
+    let mut last_non_ws: u8 = b';'; // pretend we're at statement start
+
+    while i < lim {
+        let b = line[i];
+        match state {
+            State::InComment => {
+                // Everything from here to `pos` is a comment.
+                return PosContext::NonCode;
             }
-            Some(delim) if line[i] == delim => {
-                in_str = None;
+            State::InSingleStr => {
+                if b == b'\\' {
+                    i += 2;
+                    continue;
+                } else if b == b'\'' {
+                    state = State::Code;
+                }
             }
-            Some(_) => {}
-            None if line[i] == b'"' || line[i] == b'\'' => {
-                in_str = Some(line[i]);
+            State::InDoubleStr => {
+                if b == b'\\' {
+                    i += 2;
+                    continue;
+                } else if b == b'"' {
+                    state = State::Code;
+                }
+                // Note: #{...} interpolation is skipped conservatively —
+                // we don't recurse into it; treating it as part of the string
+                // is safe because the heredoc guard already handles multi-line.
             }
-            None if line[i] == b'#' => return false, // comment — nothing after this is code
-            None => {}
+            State::InRegex => {
+                if b == b'\\' {
+                    i += 2;
+                    continue;
+                } else if b == b'/' {
+                    state = State::Code;
+                }
+            }
+            State::InPercent(open, close) => {
+                if b == b'\\' {
+                    i += 2;
+                    continue;
+                } else if b == open {
+                    percent_depth += 1;
+                } else if b == close {
+                    if percent_depth == 0 {
+                        state = State::Code;
+                    } else {
+                        percent_depth -= 1;
+                    }
+                }
+            }
+            State::Code => {
+                match b {
+                    b'\'' => state = State::InSingleStr,
+                    b'"' => state = State::InDoubleStr,
+                    b'#' => {
+                        // `#{` is interpolation inside a double string —
+                        // but we already handle that in InDoubleStr.
+                        // A bare `#` in code context starts a comment.
+                        state = State::InComment;
+                        // Everything after here is a comment; if pos > i we
+                        // will return NonCode on the next iteration.
+                    }
+                    b'/' => {
+                        // Regex heuristic: `/` opens a regex when the previous
+                        // meaningful token looks like an operator context.
+                        if is_regex_opener(last_non_ws) {
+                            state = State::InRegex;
+                        }
+                        // else: division operator — stay in Code
+                    }
+                    b'%' => {
+                        // Percent literal: %q(...) %w[...] %( etc.
+                        // Peek ahead to find the sigil character and bracket.
+                        let j = i + 1;
+                        if j < lim {
+                            // Optional letter sigil (q, Q, w, W, i, I, r, x, s)
+                            let (sigil_len, brace_pos) = if line[j].is_ascii_alphabetic() {
+                                (1usize, j + 1)
+                            } else {
+                                (0usize, j)
+                            };
+                            let _ = sigil_len;
+                            if brace_pos < lim {
+                                if let Some(close) = matching_close(line[brace_pos]) {
+                                    state = State::InPercent(line[brace_pos], close);
+                                    percent_depth = 0;
+                                    i = brace_pos + 1;
+                                    continue;
+                                }
+                            }
+                        }
+                        // Not a valid percent literal opener — treat as operator.
+                    }
+                    _ => {}
+                }
+                if !b.is_ascii_whitespace() {
+                    last_non_ws = b;
+                }
+            }
         }
         i += 1;
     }
-    in_str.is_some()
+
+    match state {
+        State::Code => PosContext::Code,
+        _ => PosContext::NonCode,
+    }
+}
+
+/// Returns true if a `/` following `last_non_ws` should be treated as a
+/// regex opener rather than a division operator.
+fn is_regex_opener(last: u8) -> bool {
+    matches!(
+        last,
+        b'=' | b'(' | b',' | b'[' | b'{' | b'!' | b'~' | b'&' | b'|'
+            | b'<' | b'>' | b'+' | b'-' | b'*' | b':' | b';' | b'\n'
+    )
+}
+
+/// Given a bracket/brace/paren character, return its matching close character.
+/// Returns `None` if the character is not a recognised opener.
+fn matching_close(open: u8) -> Option<u8> {
+    match open {
+        b'(' => Some(b')'),
+        b'[' => Some(b']'),
+        b'{' => Some(b'}'),
+        b'<' => Some(b'>'),
+        b'|' => Some(b'|'),
+        _ => None,
+    }
 }
 
 impl Rule for AndOr {
@@ -82,8 +227,8 @@ impl Rule for AndOr {
                 while let Some(pos) = line[search_start..].find(pattern) {
                     let abs_pos = search_start + pos;
 
-                    // Skip if this match is inside a string literal
-                    if pos_in_string(bytes, abs_pos) {
+                    // Skip if this match is inside a string, comment, regex, or percent literal
+                    if pos_context(bytes, abs_pos) != PosContext::Code {
                         search_start = abs_pos + 1;
                         if search_start >= line.len() {
                             break;

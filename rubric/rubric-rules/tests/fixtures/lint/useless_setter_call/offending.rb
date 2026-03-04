@@ -1,3 +1,4 @@
 def foo
-  self.bar = 1
+  result = calculate
+  self.bar = result
 end

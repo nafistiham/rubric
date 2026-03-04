@@ -159,3 +159,192 @@ fn no_false_positive_for_multiline_array_literal_continuation() {
         diags
     );
 }
+
+// ── Heredoc body lines must NOT fire ─────────────────────────────────────────
+// Lines inside a <<-TERM / <<~TERM heredoc are raw string content, not Ruby
+// code, so their indentation is irrelevant to the IndentationWidth rule.
+#[test]
+fn no_false_positive_for_heredoc_body_lines() {
+    let src = concat!(
+        "create_view \"account_summaries\", sql_definition: <<-SQL\n",
+        "   SELECT accounts.id AS account_id,\n",    // 3 spaces — odd
+        "     FROM accounts\n",                       // 5 spaces — odd
+        "SQL\n",
+        "add_index \"account_summaries\", [\"account_id\"]\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "heredoc body lines should not be flagged: {:?}",
+        diags
+    );
+}
+
+// ── Squiggly heredoc (<<~) body lines must NOT fire ──────────────────────────
+#[test]
+fn no_false_positive_for_squiggly_heredoc_body_lines() {
+    let src = concat!(
+        "message = <<~MSG\n",
+        "   Hello world\n",   // 3 spaces — odd, but inside heredoc
+        "MSG\n",
+        "puts message\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "squiggly heredoc body lines should not be flagged: {:?}",
+        diags
+    );
+}
+
+// ── ||= if continuation alignment must NOT fire ──────────────────────────────
+// `@var ||= if condition\n             value\n           end`
+// The body is aligned to the `if` keyword, producing odd-number indents.
+#[test]
+fn no_false_positive_for_memoized_inline_if_continuation() {
+    let src = concat!(
+        "def reports\n",
+        "  @reports ||= if type == 'none'\n",
+        "                 [report]\n",
+        "               else\n",
+        "                 target_account.targeted_reports\n",
+        "               end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "||= if alignment should not be flagged: {:?}",
+        diags
+    );
+}
+
+// ── Backslash line-continuation must NOT fire ─────────────────────────────────
+// `raise ArgumentError, "long message" \
+//                       unless condition`
+// The continuation line is aligned to the string start — odd indent, valid.
+#[test]
+fn no_false_positive_for_backslash_continuation() {
+    let src = concat!(
+        "def foo\n",
+        "  raise ArgumentError, \"bad argument\" \\\n",
+        "                       unless valid?\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "backslash continuation line should not be flagged: {:?}",
+        diags
+    );
+}
+
+// ── Boolean &&/|| continuation must NOT fire ──────────────────────────────────
+// Multi-line boolean expressions where each operand is aligned to the first:
+//   if record.respond_to?(:foo) &&
+//      record.bar?
+// The second line has 5-space indent — odd but conventional.
+#[test]
+fn no_false_positive_for_boolean_and_continuation() {
+    let src = concat!(
+        "Warden::Manager.after_set_user do |record, warden, options|\n",
+        "  if record.respond_to?(:remember_me) && options[:store] != false &&\n",
+        "     record.remember_me && warden.authenticated?(scope)\n",
+        "    do_something\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "&& boolean continuation should not be flagged: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_false_positive_for_boolean_or_continuation() {
+    let src = concat!(
+        "def foo\n",
+        "  result = a_long_condition? ||\n",
+        "           another_condition?\n",
+        "  result\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "|| boolean continuation should not be flagged: {:?}",
+        diags
+    );
+}
+
+// ── Method chain with leading dot must NOT fire ───────────────────────────────
+// `Rails\n  .application\n  .config` — the `.method` lines are aligned to the
+// receiver. Also covers `"string".chars\n                .insert(3, ' ')`.
+#[test]
+fn no_false_positive_for_method_chain_dot() {
+    let src = concat!(
+        "Rails\n",
+        "  .application\n",
+        "  .config\n",
+        "  .session_store :cookie_store,\n",
+        "                 key: '_session',\n",
+        "                 same_site: :lax\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "method chain dot lines should not be flagged: {:?}",
+        diags
+    );
+}
+
+// ── Arithmetic/string operator at end of line continuation must NOT fire ─────
+// `entities = extract_urls(...) +\n               extract_hashtags(...)` —
+// the continuation is aligned to the first operand (15-space indent = odd).
+#[test]
+fn no_false_positive_for_arithmetic_operator_continuation() {
+    let src = concat!(
+        "def extract_entities(text)\n",
+        "  entities = extract_urls_with_indices(text) +\n",
+        "               extract_hashtags_with_indices(text) +\n",
+        "               extract_mentions_with_indices(text)\n",
+        "  entities\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "operator continuation lines should not be flagged: {:?}",
+        diags
+    );
+}
+
+// ── Comment-masked trailing comma must NOT fire ───────────────────────────────
+// When the previous line has `key: value, # comment`, the trailing comma is
+// hidden behind the comment. The next aligned arg line should still be skipped.
+#[test]
+fn no_false_positive_for_comment_masked_trailing_comma() {
+    let src = concat!(
+        ".session_store :cookie_store,\n",
+        "               key: '_session',\n",
+        "               secure: false, # All cookies use force_ssl\n",
+        "               same_site: :lax\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "comment-masked trailing comma should not defeat comma-continuation check: {:?}",
+        diags
+    );
+}

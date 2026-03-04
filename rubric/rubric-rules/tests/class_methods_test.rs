@@ -106,3 +106,72 @@ fn no_false_positive_for_class_method_after_inline_begin() {
         diags
     );
 }
+
+// def self.method inside an `included do` block must NOT be flagged, even when the
+// method body contains an assignment-expression `result = if condition ... end`.
+//
+// Root cause: `result = if condition` does not start with `if `, so is_other_block_opener
+// returned false and the inline-if block was not pushed onto the scope stack. The bare
+// `end` that closes the multi-line if expression then pops the scope for the surrounding
+// `def self.method` instead, leaving the `included do` scope as innermost for the next
+// `def self.` line — which is then falsely flagged as a module-level violation.
+#[test]
+fn no_false_positive_for_def_self_after_assignment_if_in_included_block() {
+    let src = concat!(
+        "module User::PamAuthenticable\n",
+        "  extend ActiveSupport::Concern\n",
+        "\n",
+        "  included do\n",
+        "    def self.pam_get_user(attributes = {})\n",
+        "      resource = if attributes[:email]\n",
+        "                   find_by(email: attributes[:email])\n",
+        "                 else\n",
+        "                   nil\n",
+        "                 end\n",
+        "      resource\n",
+        "    end\n",
+        "\n",
+        "    def self.authenticate_with_pam(attributes = {})\n",
+        "      super\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "def self.method inside an included do block must NOT be flagged even after assignment-if, but got: {:?}",
+        diags
+    );
+}
+
+// Variant: `result = case expr ... end` inside a method body must not desync the scope
+// stack and cause a subsequent `def self.` at the same nesting level to be falsely flagged.
+#[test]
+fn no_false_positive_for_def_self_after_assignment_case_in_included_block() {
+    let src = concat!(
+        "module Helpers\n",
+        "  included do\n",
+        "    def handle(val)\n",
+        "      result = case val\n",
+        "               when :a then 1\n",
+        "               when :b then 2\n",
+        "               end\n",
+        "      result\n",
+        "    end\n",
+        "\n",
+        "    def self.setup!\n",
+        "      true\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "def self.method inside an included do block must NOT be flagged after assignment-case, but got: {:?}",
+        diags
+    );
+}

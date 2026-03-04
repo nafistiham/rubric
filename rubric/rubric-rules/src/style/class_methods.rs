@@ -134,6 +134,21 @@ fn is_other_block_opener(trimmed: &str) -> bool {
     if trimmed.ends_with(" begin") {
         return true;
     }
+    // Assignment-expression openers: `var = if ...`, `var = case ...`, `var = unless ...`.
+    // Ruby allows `if`, `case`, and `unless` as rvalue expressions:
+    //   result = if condition
+    //     ...
+    //   end
+    // The `if`/`case`/`unless` keyword does NOT appear at the start of the trimmed line
+    // (it appears after `=`), so the leading-keyword checks above do not fire.  However
+    // the multi-line block still has a bare `end` on its own line.  If we do not push an
+    // `Other` scope for it that `end` will pop the wrong entry and desynchronise the
+    // stack, causing subsequent `def self.method` lines to be incorrectly flagged.
+    for kw in &["= if ", "= unless ", "= case "] {
+        if trimmed.contains(kw) {
+            return true;
+        }
+    }
     false
 }
 

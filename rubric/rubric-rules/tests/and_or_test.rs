@@ -164,3 +164,91 @@ fn still_detects_and_outside_string_when_string_also_present() {
     );
     assert!(diags.iter().all(|d| d.rule == "Style/AndOr"));
 }
+
+// `or` inside an inline comment after code must NOT be flagged.
+// Example: `field :token  # Only if unlock strategy is :email or :both`
+#[test]
+fn no_false_positive_or_inside_inline_comment() {
+    let source = "field :unlock_token, type: String # Only if unlock strategy is :email or :both\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = AndOr.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "`or` inside inline comment must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// `and` inside an inline comment after code must NOT be flagged.
+// Example: `# 240.0.0.0 - 255.255.255.254  and  255.255.255.255`
+#[test]
+fn no_false_positive_and_inside_inline_comment() {
+    let source = "/^(24\\d|25[0-5])\\./     # 240.0.0.0 - 255.255.255.254  and  255.255.255.255\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = AndOr.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "`and` inside inline comment must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// `or` inside a regex literal must NOT be flagged.
+// Example: `assert_match(/\AValid cards can be left blank or include/, e.message)`
+#[test]
+fn no_false_positive_or_inside_regex_literal() {
+    let source = "assert_match(/\\AValid credit cards argument can be left blank or include/, e.message)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = AndOr.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "`or` inside regex literal must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// `or` inside a `%q(...)` percent literal must NOT be flagged.
+// Example: `raise %q(You need ActiveRecord >= 7.2 or to add gem)`
+#[test]
+fn no_false_positive_or_inside_percent_q_literal() {
+    let source = "raise %q(You need ActiveRecord >= 7.2 or to add gem to your Gemfile)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = AndOr.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "`or` inside %q(...) literal must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// `or` inside a `%(...)` percent literal (single line with \n escapes) must NOT be flagged.
+// Matches the real pattern from devise: result = %(... sign in or sign up ...)
+#[test]
+fn no_false_positive_or_inside_bare_percent_literal() {
+    // Simulates the actual devise line where the whole %() is on one line.
+    let source = "result = %(<?xml version=\"1.0\"?>\\n<error>sign in or sign up</error>\\n)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = AndOr.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "`or` inside %(...) literal must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// Code followed by a comment: code-`or`/`and` must still be flagged,
+// comment-`or`/`and` must not.
+#[test]
+fn flags_code_or_but_not_comment_or_on_same_line() {
+    // `a or b` in code part, then `# or something` in comment — only one flag.
+    let source = "x = a or b  # use or for flow control\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = AndOr.check_source(&ctx);
+    // The code `or` is genuine; the comment `or` must be skipped.
+    assert_eq!(
+        diags.len(),
+        1,
+        "expected exactly 1 violation (code `or`, not comment `or`), got: {:?}",
+        diags
+    );
+}

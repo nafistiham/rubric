@@ -3,6 +3,110 @@ use std::collections::HashMap;
 
 pub struct DuplicateMethods;
 
+/// Count word-boundary `end` tokens on the line.
+fn count_ends(line: &str) -> i64 {
+    if line.trim_start().starts_with('#') {
+        return 0;
+    }
+    let bytes = line.as_bytes();
+    let n = bytes.len();
+    let mut count = 0i64;
+    let mut i = 0usize;
+    while i + 2 < n {
+        if &bytes[i..i + 3] == b"end" {
+            let before_ok =
+                i == 0 || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
+            let after_ok =
+                i + 3 >= n || (!bytes[i + 3].is_ascii_alphanumeric() && bytes[i + 3] != b'_');
+            if before_ok && after_ok {
+                count += 1;
+            }
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    count
+}
+
+/// Classify a fully-trimmed line.
+/// Returns `(opens_block, isolates_method_namespace)`.
+///
+/// Only these keywords open a block that requires a matching `end`:
+///   class, module, class<<self  → isolating (own method namespace)
+///   do-blocks                   → isolating (RSpec DSL, Class.new, etc.)
+///   def                         → non-isolating
+///   if, unless, while, until, for, case, begin → non-isolating
+///
+/// NOTE: `rescue`, `else`, `elsif`, `ensure` are clause separators inside
+/// existing blocks — they do NOT open a new block and do NOT consume an `end`.
+fn classify_opener(t: &str) -> (bool, bool) {
+    // class/module/class<<self — new isolating scope
+    if t.starts_with("class ") || t == "class"
+        || t.starts_with("module ") || t == "module"
+        || t.starts_with("class << ")
+    {
+        return (true, true);
+    }
+
+    // `do` block — isolating (RSpec, Thread.new, Class.new, etc.)
+    if t == "do"
+        || t.ends_with(" do")
+        || t.contains(" do |")
+        || t.contains(" do\t")
+    {
+        return (true, true);
+    }
+
+    // def — opens a block but NOT a new method namespace
+    if t.starts_with("def ") || t == "def" {
+        return (true, false);
+    }
+
+    // Control-flow block openers (each needs a matching `end`)
+    for kw in &["if ", "unless ", "while ", "until ", "for ", "case ", "begin"] {
+        if t.starts_with(kw) || t == *kw {
+            return (true, false);
+        }
+    }
+
+    (false, false)
+}
+
+/// Try to extract a heredoc marker from the line.
+/// Returns `Some(marker)` if the line opens a heredoc (<<MARKER or <<~MARKER or <<"MARKER" etc.).
+/// The returned marker is what to look for as the closing line (stripped of quotes).
+fn heredoc_marker(line: &str) -> Option<String> {
+    // Look for << followed by optional ~ and optional quotes, then the marker identifier.
+    let mut rest = line;
+    loop {
+        let pos = rest.find("<<")?;
+        let after = &rest[pos + 2..];
+        // Skip optional ~
+        let after = after.strip_prefix('~').unwrap_or(after);
+        // Skip optional quote char
+        let (after, _quoted) = if after.starts_with('"') || after.starts_with('\'') || after.starts_with('`') {
+            (&after[1..], true)
+        } else {
+            (after, false)
+        };
+        // Collect the identifier characters
+        let end = after
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(after.len());
+        if end > 0 {
+            return Some(after[..end].to_string());
+        }
+        // Try further in the line
+        if pos + 2 < rest.len() {
+            rest = &rest[pos + 2..];
+        } else {
+            break;
+        }
+    }
+    None
+}
+
 impl Rule for DuplicateMethods {
     fn name(&self) -> &'static str {
         "Lint/DuplicateMethods"
@@ -13,50 +117,113 @@ impl Rule for DuplicateMethods {
         let lines = &ctx.lines;
         let n = lines.len();
 
-        // Map: method_name -> first line index, scoped per class/module
-        let mut seen: HashMap<String, usize> = HashMap::new();
+        // Each stack frame: (seen_methods, depth, isolates_namespace)
+        // Bottom frame: the file scope. depth = -1 (sentinel: never popped). isolates = true.
+        let mut stack: Vec<(HashMap<String, usize>, i64, bool)> =
+            vec![(HashMap::new(), -1i64, true)];
+
+        // Heredoc state: if Some(marker), we're inside a heredoc body and skip until marker.
+        let mut heredoc_end: Option<String> = None;
 
         for i in 0..n {
-            let trimmed = lines[i].trim_start();
-
-            // Reset seen map when entering a new class or module scope
+            let raw = &lines[i];
+            let trimmed = raw.trim_start();
             let t = trimmed.trim();
-            if t.starts_with("class ") || t.starts_with("module ") {
-                seen.clear();
+
+            // --- Heredoc body: skip until closing marker ---
+            if let Some(ref marker) = heredoc_end.clone() {
+                if t == marker.as_str() {
+                    heredoc_end = None;
+                }
                 continue;
             }
 
-            if !trimmed.starts_with("def ") {
+            if t.is_empty() || t.starts_with('#') {
                 continue;
             }
 
-            // Extract method name
-            let after_def = &trimmed["def ".len()..];
-            let name_end = after_def
-                .find(|c: char| c == '(' || c == ' ' || c == '\n')
-                .unwrap_or(after_def.len());
-            let method_name = &after_def[..name_end];
+            // --- Detect heredoc opening on this line ---
+            // If this line opens a heredoc, subsequent lines until the marker are body.
+            let opens_heredoc = heredoc_marker(t);
 
-            if method_name.is_empty() {
-                continue;
+            let mut remaining_ends = count_ends(t);
+            let (opens, isolates) = classify_opener(t);
+
+            // --- Push new frame for block-openers ---
+            if opens {
+                stack.push((HashMap::new(), 1i64, isolates));
             }
 
-            if let Some(&first_line) = seen.get(method_name) {
-                let indent = lines[i].len() - trimmed.len();
-                let line_start = ctx.line_start_offsets[i] as usize;
-                let pos = (line_start + indent) as u32;
-                diags.push(Diagnostic {
-                    rule: self.name(),
-                    message: format!(
-                        "Duplicate method `{}` (first defined at line {}).",
-                        method_name,
-                        first_line + 1
-                    ),
-                    range: TextRange::new(pos, pos + trimmed.len() as u32),
-                    severity: Severity::Warning,
-                });
-            } else {
-                seen.insert(method_name.to_string(), i);
+            // --- Record/check `def` method name ---
+            if trimmed.starts_with("def ") {
+                let after_def = &trimmed["def ".len()..];
+                let name_end = after_def
+                    .find(|c: char| c == '(' || c == ' ' || c == '\n' || c == ';')
+                    .unwrap_or(after_def.len());
+                let method_name = after_def[..name_end].trim();
+
+                if !method_name.is_empty() {
+                    // Skip singleton method definitions on variable receivers:
+                    // `def some_var.method_name` — the method is defined on a specific object,
+                    // not on the class, and the receiver identifies which object it's on.
+                    // Only `def self.method_name` should be tracked (it defines a class method
+                    // that genuinely conflicts if repeated).
+                    let is_singleton_on_var = if let Some(dot_pos) = method_name.find('.') {
+                        &method_name[..dot_pos] != "self"
+                    } else {
+                        false
+                    };
+
+                    if !is_singleton_on_var {
+                        // Walk down to find the nearest isolating frame (above the def frame).
+                        let len = stack.len();
+                        let isolating_idx = (0..len.saturating_sub(1))
+                            .rev()
+                            .find(|&idx| stack[idx].2);
+
+                        if let Some(idx) = isolating_idx {
+                            if let Some(&first_line) = stack[idx].0.get(method_name) {
+                                let indent = lines[i].len() - trimmed.len();
+                                let line_start = ctx.line_start_offsets[i] as usize;
+                                let pos = (line_start + indent) as u32;
+                                diags.push(Diagnostic {
+                                    rule: self.name(),
+                                    message: format!(
+                                        "Duplicate method `{}` (first defined at line {}).",
+                                        method_name,
+                                        first_line + 1
+                                    ),
+                                    range: TextRange::new(pos, pos + trimmed.len() as u32),
+                                    severity: Severity::Warning,
+                                });
+                            } else {
+                                stack[idx].0.insert(method_name.to_string(), i);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- Apply `end` tokens, cascading through frames ---
+            while remaining_ends > 0 {
+                let top_depth = stack.last().unwrap().1;
+                if top_depth < 0 {
+                    // File-scope sentinel — never pop.
+                    break;
+                }
+                let absorbed = remaining_ends.min(top_depth);
+                stack.last_mut().unwrap().1 -= absorbed;
+                remaining_ends -= absorbed;
+
+                let d = stack.last().unwrap().1;
+                if d <= 0 && stack.len() > 1 {
+                    stack.pop();
+                }
+            }
+
+            // --- After processing this line, set heredoc state if opened ---
+            if let Some(marker) = opens_heredoc {
+                heredoc_end = Some(marker);
             }
         }
 
