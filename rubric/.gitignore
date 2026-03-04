@@ -1,3 +1,4 @@
 target/
 gem/*.gem
 gem/pkg/
+internals/
