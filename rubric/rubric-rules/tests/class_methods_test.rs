@@ -72,3 +72,37 @@ fn no_false_positive_for_class_nested_in_module() {
         diags
     );
 }
+
+// A class method that uses a trailing `begin..end` block (e.g. `@@x ||= begin ... end`)
+// must not cause the scope tracker to desync and flag subsequent def self.methods in the
+// same class as violations.
+//
+// Root cause: `@@day ||= begin` does not start with `begin`, so is_other_block_opener
+// returns false and the begin block is not pushed onto the scope stack. The end that
+// closes the begin block then pops the scope for def self.day instead, and the end that
+// closes def self.day pops the enclosing Class scope. Everything that follows then sees
+// Module as the innermost scope and is incorrectly flagged.
+#[test]
+fn no_false_positive_for_class_method_after_inline_begin() {
+    let src = concat!(
+        "module Outer\n",
+        "  class CLI\n",
+        "    def self.day\n",
+        "      @@day ||= begin\n",
+        "        42\n",
+        "      end\n",
+        "    end\n",
+        "    def self.r\n",
+        "      'red'\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ClassMethods.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "def self.method after inline begin..end in a class must NOT be flagged, but got: {:?}",
+        diags
+    );
+}

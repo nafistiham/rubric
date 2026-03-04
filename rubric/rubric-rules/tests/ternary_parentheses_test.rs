@@ -75,3 +75,21 @@ fn still_detects_unnecessary_parens_around_method_call_comparison() {
     let diags = TernaryParentheses.check_source(&ctx);
     assert!(!diags.is_empty(), "expected violation for (pageidx.to_i < 1) ?, got none");
 }
+
+// FP: AllowSafeAssignment — `(var = expr) ?` parens are required to make assignment the condition
+#[test]
+fn no_false_positive_for_safe_assignment_in_ternary_condition() {
+    let src = "result = (x = foo) ? x.bar : default\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = TernaryParentheses.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violation for (x = foo) ? (safe assignment), got: {:?}", diags);
+}
+
+// FP: assignment with method call RHS — still a plain `=`
+#[test]
+fn no_false_positive_for_safe_assignment_with_method_rhs() {
+    let src = "value = (chunk = body.read(LEN)) ? process(chunk) : nil\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = TernaryParentheses.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violation for (chunk = body.read(LEN)) ? (safe assignment), got: {:?}", diags);
+}

@@ -122,3 +122,40 @@ fn no_false_positive_for_hash_alignment_after_open_paren() {
     let diags = IndentationWidth.check_source(&ctx);
     assert!(diags.is_empty(), "content after [ on its own line should not be flagged: {:?}", diags);
 }
+
+// ── Continuation line inside %i[] literal aligns to bracket — must NOT fire ──
+// `CREDIT_CARD_TYPES = %i[visa mastercard\n                       diners_club]`
+// Line 2 has 23-space indent (alignment to `[`) — odd but valid.
+#[test]
+fn no_false_positive_for_percent_literal_bracket_continuation() {
+    let src = concat!(
+        "CREDIT_CARD_TYPES = %i[visa mastercard discover american_express\n",
+        "                       diners_club jcb switch solo].freeze\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "continuation line inside bracket expression should not be flagged: {:?}",
+        diags
+    );
+}
+
+// ── Multiple lines inside open bracket — all should be skipped ───────────────
+#[test]
+fn no_false_positive_for_multiline_array_literal_continuation() {
+    let src = concat!(
+        "THINGS = [\n",
+        "  :foo,\n",
+        "  :bar,\n",
+        "  :baz\n",
+        "]\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = IndentationWidth.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "lines inside open array bracket should not be flagged: {:?}",
+        diags
+    );
+}

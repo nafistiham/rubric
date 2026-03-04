@@ -52,6 +52,49 @@ impl Rule for SafeNavigation {
                         && &bytes[right_start..right_start + var_len] == var_name
                         && bytes[right_start + var_len] == b'.'
                     {
+                        // Skip past var_name.method to check what follows.
+                        let method_start = right_start + var_len + 1;
+                        let mut method_end = method_start;
+                        while method_end < len
+                            && (bytes[method_end].is_ascii_alphanumeric()
+                                || bytes[method_end] == b'_'
+                                || bytes[method_end] == b'?'
+                                || bytes[method_end] == b'!')
+                        {
+                            method_end += 1;
+                        }
+                        // Skip argument parens if any: var.method(...)
+                        if method_end < len && bytes[method_end] == b'(' {
+                            let mut depth = 1;
+                            method_end += 1;
+                            while method_end < len && depth > 0 {
+                                if bytes[method_end] == b'(' {
+                                    depth += 1;
+                                } else if bytes[method_end] == b')' {
+                                    depth -= 1;
+                                }
+                                method_end += 1;
+                            }
+                        }
+                        // Check what follows the method call — if a comparison or logical
+                        // operator trails the expression, converting to `&.` would change
+                        // semantics (nil vs false difference in short-circuit evaluation).
+                        let rest = line[method_end..].trim_start();
+                        let has_trailing_op = rest.starts_with("!=")
+                            || rest.starts_with("==")
+                            || rest.starts_with("<=")
+                            || rest.starts_with(">=")
+                            || rest.starts_with(" < ")
+                            || rest.starts_with(" > ")
+                            || rest.starts_with("&&")
+                            || rest.starts_with("||")
+                            || rest.starts_with("&.") // chained safe nav
+                            || (!rest.is_empty() && rest.as_bytes()[0] == b'.');
+                        if has_trailing_op {
+                            j += 2;
+                            continue;
+                        }
+
                         let pos = (line_start + j) as u32;
                         diags.push(Diagnostic {
                             rule: self.name(),

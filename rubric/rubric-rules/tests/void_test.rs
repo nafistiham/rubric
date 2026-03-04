@@ -47,6 +47,48 @@ fn no_false_positive_for_format_string_operator() {
     assert!(diags.is_empty(), "format string % operator falsely flagged: {:?}", diags);
 }
 
+// Method calls with multiple comma-separated args are NOT void.
+// `assert_equal a + b, 10` has a comma so it is a multi-arg call.
+// Lines in the middle of a method (NOT last before `end`) must also be skipped.
+#[test]
+fn no_false_positive_for_method_call_with_arithmetic_arg_in_sequence() {
+    // Middle lines don't have `end` on the next line — the implicit-return skip
+    // does NOT apply. The comma-skip rule must catch these.
+    let src = concat!(
+        "def test_sum\n",
+        "  assert_equal a + b, 10\n",
+        "  assert_equal c + d, 20\n",
+        "  assert_equal e + f, 30\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = Void.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "method call with comma+arithmetic args should not be flagged: {:?}",
+        diags
+    );
+}
+
+// Method call with comparison operator and comma — not void
+#[test]
+fn no_false_positive_for_assert_with_comparison_and_comma() {
+    let src = concat!(
+        "def test_comparison\n",
+        "  assert_equal x > 0, true\n",
+        "  assert_equal y < 10, true\n",
+        "  assert_equal z >= 5, true\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = Void.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "assert with comparison+comma argument should not be flagged: {:?}",
+        diags
+    );
+}
+
 // `end % n % m` — chained on block result, not standalone void expression
 #[test]
 fn no_false_positive_for_end_chained_expression() {

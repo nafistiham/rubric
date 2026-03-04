@@ -55,6 +55,13 @@ impl Rule for Void {
                 continue;
             }
 
+            // Skip lines with a comma — these are method calls with multiple arguments,
+            // e.g. `assert_equal a + b, 10`. The comma disambiguates from a standalone
+            // void expression like `x + 1`.
+            if t.contains(',') {
+                continue;
+            }
+
             // Detect standalone arithmetic/comparison: `x + 1`, `y * 3`
             // Pattern: simple expression with arithmetic operator, no assignment
             let has_arithmetic = t.contains(" + ") || t.contains(" - ") || t.contains(" * ")
@@ -64,6 +71,15 @@ impl Rule for Void {
                 || t.contains(" >= ") || t.contains(" <= ");
 
             if has_arithmetic {
+                // Additional guard: if there are more than 2 spaces in the expression,
+                // it likely has more than 2 tokens around an operator and is probably
+                // a method call with an arithmetic argument rather than a standalone
+                // void expression. A simple void like `x + 1` has exactly 2 spaces.
+                let space_count = t.chars().filter(|&c| c == ' ').count();
+                if space_count > 2 {
+                    continue;
+                }
+
                 let indent = line.len() - trimmed.len();
                 let line_start = ctx.line_start_offsets[i] as usize;
                 let pos = (line_start + indent) as u32;

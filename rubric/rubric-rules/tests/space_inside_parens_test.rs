@@ -29,3 +29,21 @@ fn no_false_positive_for_multiline_paren_close() {
     let diags = SpaceInsideParens.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations for multiline paren close, got: {:?}", diags);
 }
+
+// FP: parens inside regex literals must not be flagged
+#[test]
+fn no_false_positive_for_paren_inside_regex() {
+    let src = "line =~ /(?:Master|      ) PID:/\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideParens.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violation for paren in regex, got: {:?}", diags);
+}
+
+// FP: non-capturing regex group `(?:...)` after `=~`
+#[test]
+fn no_false_positive_for_non_capturing_group_in_regex() {
+    let src = "m = str.match(/(?:foo|bar) baz/)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideParens.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violation for non-capturing group in regex, got: {:?}", diags);
+}

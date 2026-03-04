@@ -98,3 +98,69 @@ fn no_false_positive_for_and_break() {
         diags
     );
 }
+
+// `and`/`or` inside a double-quoted string literal must NOT be flagged.
+#[test]
+fn no_false_positive_and_inside_double_quoted_string() {
+    let source = r#"logger.info "Upgrade for more features and support""# ;
+    let source = format!("{}\n", source);
+    let ctx = LintContext::new(Path::new("test.rb"), &source);
+    let diags = AndOr.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "`and` inside string literal must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// `or` inside a double-quoted string literal must NOT be flagged.
+#[test]
+fn no_false_positive_or_inside_double_quoted_string() {
+    let source = "msg = \"Ensure Redis is running in the same AZ or datacenter\"\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = AndOr.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "`or` inside string literal must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// `and`/`or` inside single-quoted strings must NOT be flagged.
+#[test]
+fn no_false_positive_and_inside_single_quoted_string() {
+    let source = "msg = 'features and support'\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = AndOr.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "`and` inside single-quoted string literal must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// `and`/`or` inside a heredoc body must NOT be flagged.
+#[test]
+fn no_false_positive_or_inside_heredoc_body() {
+    let source = "msg = <<~TEXT\n  Ensure Redis is running in the same AZ or datacenter\nTEXT\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = AndOr.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "`or` inside heredoc body must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// Real code using `and`/`or` as operators must still be flagged even when strings are present.
+#[test]
+fn still_detects_and_outside_string_when_string_also_present() {
+    let source = "x = foo and bar\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = AndOr.check_source(&ctx);
+    assert!(
+        !diags.is_empty(),
+        "`and` as boolean operator must be flagged even when strings present"
+    );
+    assert!(diags.iter().all(|d| d.rule == "Style/AndOr"));
+}

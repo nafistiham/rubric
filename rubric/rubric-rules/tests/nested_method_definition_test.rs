@@ -89,6 +89,48 @@ fn still_detects_nested_def_after_endless_in_outer() {
     assert_eq!(diags.len(), 1);
 }
 
+// Single-line def false-positive tests
+
+#[test]
+fn no_false_positive_for_single_line_def_setup() {
+    // `def setup; @foo = Foo.new; end` is a one-liner.
+    // The `end` is on the same line so depth should never be incremented.
+    // The next `def` must NOT be flagged as nested.
+    let src = concat!(
+        "def setup; @foo = Foo.new; end\n",
+        "\n",
+        "def test_something\n",
+        "  assert @foo\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NestedMethodDefinition.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "single-line def should not leave phantom depth; got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_false_positive_for_single_line_def_with_semicolon_end() {
+    // Multiple single-line defs followed by a regular method.
+    let src = concat!(
+        "def teardown; super; end\n",
+        "def helper; 42; end\n",
+        "def real_method\n",
+        "  1\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NestedMethodDefinition.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "multiple single-line defs should not accumulate depth; got: {:?}",
+        diags
+    );
+}
+
 // Heredoc false-positive tests
 
 #[test]

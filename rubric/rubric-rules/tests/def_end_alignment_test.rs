@@ -180,6 +180,44 @@ fn no_false_positive_for_protected_def() {
     assert!(diags.is_empty(), "protected def falsely flagged: {:?}", diags);
 }
 
+// ── False positive: heredoc body with def/end keywords inside ─────────────────
+#[test]
+fn no_false_positive_for_heredoc_body_with_def_end() {
+    let src = concat!(
+        "class Foo\n",
+        "  def bar\n",
+        "    class_eval <<-METHODS\n",
+        "      def baz\n",
+        "        42\n",
+        "      end\n",
+        "    METHODS\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no FP for heredoc body with def/end, got: {:?}", diags);
+}
+
+// ── False positive: squiggly heredoc `<<~RUBY` with def/end inside ───────────
+#[test]
+fn no_false_positive_for_squiggly_heredoc_body_with_def_end() {
+    let src = concat!(
+        "module Devise\n",
+        "  def self.setup\n",
+        "    class_eval <<~METHODS\n",
+        "      def authenticate!\n",
+        "        warden.authenticate!\n",
+        "      end\n",
+        "    METHODS\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no FP for squiggly heredoc body with def/end, got: {:?}", diags);
+}
+
 // ── False positive: inline `if` with nested inline `begin` inside def ─────────
 #[test]
 fn no_false_positive_for_inline_if_with_nested_inline_begin() {

@@ -16,10 +16,11 @@ fn percent_literal_closer(opener: char) -> char {
 }
 
 /// Strip string literals (single- and double-quoted), percent literals
-/// (%(...), %w[...], %i[...], etc.), and inline comments from a line,
-/// replacing their content with spaces so that character positions are preserved.
-/// This prevents `<`, `>` inside strings, percent literals, or comments from
-/// being treated as comparison operators.
+/// (%(...), %w[...], %i[...], etc.), regex literals (/…/), and inline
+/// comments from a line, replacing their content with spaces so that
+/// character positions are preserved.
+/// This prevents `<`, `>` inside strings, percent literals, regex, or comments
+/// from being treated as comparison operators.
 fn sanitise_line(line: &str) -> String {
     let chars: Vec<char> = line.chars().collect();
     let len = chars.len();
@@ -128,10 +129,90 @@ fn sanitise_line(line: &str) -> String {
             continue;
         }
 
+        // Regex literal: `/pattern/flags`
+        // We detect `/` when preceded only by whitespace, an operator, or
+        // the start of the line — i.e. it is a regex opener, not division.
+        // Simple heuristic: if the previous non-space char is one of
+        // `=`, `(`, `,`, `[`, `!`, `&`, `|`, `{`, `;`, or start-of-line,
+        // treat this `/` as beginning a regex literal and blank until the
+        // closing unescaped `/`.
+        if ch == '/' {
+            let prev_non_space = (0..i)
+                .rev()
+                .find(|&j| chars[j] != ' ' && chars[j] != '\t')
+                .map(|j| chars[j]);
+            let is_regex_start = match prev_non_space {
+                None => true, // start of line
+                Some(c) => matches!(c, '=' | '(' | ',' | '[' | '!' | '&' | '|' | '{' | ';' | ':' | '<' | '>' | '+' | '-' | '*' | '%' | '^' | '~' | '?' | '\n'),
+            };
+            if is_regex_start {
+                out[i] = ' '; // opening slash
+                i += 1;
+                while i < len && chars[i] != '/' {
+                    if chars[i] == '\\' && i + 1 < len {
+                        out[i] = ' ';
+                        i += 1;
+                        out[i] = ' ';
+                    } else {
+                        out[i] = ' ';
+                    }
+                    i += 1;
+                }
+                if i < len {
+                    out[i] = ' '; // closing slash
+                }
+                i += 1;
+                // Skip any trailing regex flags (i, m, x, etc.)
+                while i < len && chars[i].is_ascii_alphabetic() {
+                    out[i] = ' ';
+                    i += 1;
+                }
+                continue;
+            }
+        }
+
         i += 1;
     }
 
     out.iter().collect()
+}
+
+/// Extract the heredoc terminator word from a line that opens a heredoc.
+///
+/// Handles `<<~WORD`, `<<-WORD`, and `<<WORD` (bare). Returns `None` if
+/// no heredoc opener is found on the line.
+///
+/// Quoted heredocs (e.g. `<<"WORD"` or `<<'WORD'`) are also handled by
+/// stripping the surrounding quote characters.
+fn heredoc_terminator(line: &str) -> Option<String> {
+    let pos = line.find("<<")?;
+    let rest = &line[pos + 2..];
+
+    // Strip optional `-` or `~` sigil.
+    let rest = rest.strip_prefix('-').unwrap_or(rest);
+    let rest = rest.strip_prefix('~').unwrap_or(rest);
+
+    // Strip optional surrounding quotes.
+    let rest = if (rest.starts_with('"') && rest.contains('"'))
+        || (rest.starts_with('\'') && rest.contains('\''))
+        || (rest.starts_with('`') && rest.contains('`'))
+    {
+        &rest[1..]
+    } else {
+        rest
+    };
+
+    // Collect the identifier (letters, digits, underscores).
+    let word: String = rest
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+
+    if word.is_empty() {
+        None
+    } else {
+        Some(word)
+    }
 }
 
 /// Collect (byte_offset, operator_str) pairs for standalone comparison operators in
@@ -202,11 +283,31 @@ impl Rule for MultipleComparison {
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let mut seen_lines: HashSet<usize> = HashSet::new();
+        // When `Some(word)`, we are inside a heredoc whose terminator is `word`.
+        let mut heredoc_term: Option<String> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             let trimmed = line.trim_start();
+            let t = trimmed.trim();
+
+            // If we are inside a heredoc body, skip until we find the terminator.
+            if let Some(ref term) = heredoc_term {
+                if t == term.as_str() {
+                    heredoc_term = None;
+                }
+                // Either way (terminator line or body line), skip comparison check.
+                continue;
+            }
+
             if trimmed.starts_with('#') {
                 continue;
+            }
+
+            // Check whether this line opens a heredoc; record terminator for
+            // subsequent lines. The opening line itself is still checked for
+            // chained comparisons (the `<<~WORD` expression is valid Ruby).
+            if let Some(term) = heredoc_terminator(line) {
+                heredoc_term = Some(term);
             }
 
             let sanitised = sanitise_line(line);

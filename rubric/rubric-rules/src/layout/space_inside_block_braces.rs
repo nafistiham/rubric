@@ -147,7 +147,7 @@ impl Rule for SpaceInsideBlockBraces {
 
                     brace_kind_stack.push(!is_hash); // true = block
 
-                    if !is_hash && next != b' ' && next != b'\n' && next != b'}' {
+                    if !is_hash && next != b' ' && next != b'\n' && next != b'}' && next != 0 {
                         let flag_pos = (line_start + pos) as u32;
                         diags.push(Diagnostic {
                             rule: self.name(),

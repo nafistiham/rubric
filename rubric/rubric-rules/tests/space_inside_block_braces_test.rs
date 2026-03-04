@@ -137,3 +137,33 @@ fn no_false_positive_for_pattern_matching() {
     let diags = SpaceInsideBlockBraces.check_source(&ctx);
     assert!(diags.is_empty(), "pattern matching falsely flagged: {:?}", diags);
 }
+
+// ── False positive: multiline block opener (brace at end of line) ────────────
+// `do_thing {\n  ...\n}` — the `{` ends the line; rubocop only checks
+// single-line blocks. Must not fire.
+#[test]
+fn no_false_positive_for_multiline_block_opener() {
+    let src = "items.each {\n  puts item\n}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideBlockBraces.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "multiline block opener falsely flagged: {:?}",
+        diags
+    );
+}
+
+// ── False positive: multiline block with arguments ───────────────────────────
+// `items.each_with_index { |item, i|\n  ...\n}` — brace is last non-ws char on
+// the opener line. Must not fire.
+#[test]
+fn no_false_positive_for_multiline_block_with_args() {
+    let src = "items.each_with_index { |item, i|\n  process(item, i)\n}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideBlockBraces.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "multiline block with args falsely flagged: {:?}",
+        diags
+    );
+}

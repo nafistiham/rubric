@@ -39,6 +39,18 @@ fn is_endless_method(t: &str) -> bool {
     false
 }
 
+/// Returns `true` when the trimmed line is a single-line method definition that
+/// opens and closes on the same line, e.g. `def setup; body; end`.
+///
+/// These one-liners never increment def_depth because their `end` token is on
+/// the same line as the `def` — the line-by-line scanner would otherwise miss
+/// the closing `end` and leave depth permanently elevated.
+fn is_one_liner_def(t: &str) -> bool {
+    // Must contain "; end" somewhere after the def signature.
+    // Also accept the rare "; end " (end followed by a comment marker).
+    t.contains("; end") || t.contains(";end")
+}
+
 /// Extract the heredoc terminator word from a line that opens a heredoc.
 ///
 /// Handles `<<~WORD`, `<<-WORD`, and `<<WORD` (bare). Returns `None` if
@@ -127,17 +139,31 @@ impl Rule for NestedMethodDefinition {
                     continue;
                 }
 
+                // Single-line `def method; body; end` — the `end` is on the same
+                // line as the `def`. The line-by-line scan would never see the
+                // closing `end`, leaving depth permanently elevated. Skip depth
+                // changes entirely for these one-liners.
+                if is_one_liner_def(t) {
+                    continue;
+                }
+
                 if def_depth > 0 {
-                    // Nested def
-                    let indent = raw.len() - trimmed.len();
-                    let line_start = ctx.line_start_offsets[i] as usize;
-                    let pos = (line_start + indent) as u32;
-                    diags.push(Diagnostic {
-                        rule: self.name(),
-                        message: "Method defined inside another method.".into(),
-                        range: TextRange::new(pos, pos + t.len() as u32),
-                        severity: Severity::Warning,
-                    });
+                    // Nested def — flag it (unless it's a singleton method def `def obj.method`)
+                    // Skip singleton method definitions like `def self.foo` or `def obj.foo`
+                    let after_def = t.strip_prefix("def ").unwrap_or("");
+                    let is_singleton = after_def.contains('.') && !after_def.starts_with('(');
+
+                    if !is_singleton {
+                        let indent = raw.len() - trimmed.len();
+                        let line_start = ctx.line_start_offsets[i] as usize;
+                        let pos = (line_start + indent) as u32;
+                        diags.push(Diagnostic {
+                            rule: self.name(),
+                            message: "Method defined inside another method.".into(),
+                            range: TextRange::new(pos, pos + t.len() as u32),
+                            severity: Severity::Warning,
+                        });
+                    }
                 }
                 def_depth += 1;
             } else if t == "end" && def_depth > 0 {

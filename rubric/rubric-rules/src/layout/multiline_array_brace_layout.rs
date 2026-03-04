@@ -18,6 +18,12 @@ impl Rule for MultilineArrayBraceLayout {
         for i in 1..n {
             let line = &lines[i];
             let trimmed = line.trim();
+
+            // Skip comment lines — they cannot close a real array
+            if trimmed.starts_with('#') {
+                continue;
+            }
+
             // Look for `]` at the end of a line that also has other content
             // and the previous line(s) indicate this is a multiline array
             if trimmed.ends_with(']') && !trimmed.starts_with('[') && trimmed.len() > 1 {
@@ -34,12 +40,17 @@ impl Rule for MultilineArrayBraceLayout {
                         continue;
                     }
 
-                    // Check if there's a matching `[` on a previous line (multiline)
+                    // Check if there's a matching `[` on a previous line (multiline).
+                    // Skip comment lines during the backward scan — a `[` inside a comment
+                    // is not a real array opener.
                     let mut is_multiline = false;
                     let mut j = i;
                     while j > 0 {
                         j -= 1;
                         let prev = lines[j].trim();
+                        if prev.starts_with('#') {
+                            continue; // skip comment lines in backward scan
+                        }
                         if prev.trim_end().ends_with('[') {
                             is_multiline = true;
                             break;

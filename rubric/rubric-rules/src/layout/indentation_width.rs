@@ -13,6 +13,9 @@ impl Rule for IndentationWidth {
         // Track when we're inside an inline conditional (x = if / x = unless / x = case)
         // whose continuation lines have alignment-based indentation.
         let mut inline_cond_depth: usize = 0;
+        // Track unclosed bracket depth across lines. When > 0 we are inside a bracket
+        // expression and continuation lines use alignment indentation — skip odd-indent check.
+        let mut bracket_depth: i32 = 0;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             if line.is_empty() {
@@ -28,6 +31,28 @@ impl Rule for IndentationWidth {
                 });
                 prev_nonempty_line = line;
                 continue;
+            }
+
+            // Capture the bracket depth at the START of this line (before updating it from
+            // this line's content). Lines inside a bracket expression use alignment
+            // indentation and must not be flagged for odd indent counts.
+            let entering_depth = bracket_depth;
+
+            // Update bracket depth from this line's content (simplified scan — ignores
+            // string literals, but string-literal brackets don't typically cause alignment
+            // indentation so the approximation is acceptable).
+            for &b in line.as_bytes() {
+                match b {
+                    b'[' | b'(' => bracket_depth += 1,
+                    b']' | b')' => {
+                        bracket_depth -= 1;
+                        if bracket_depth < 0 {
+                            bracket_depth = 0;
+                        }
+                    }
+                    b'#' => break, // stop at start of comment
+                    _ => {}
+                }
             }
 
             // Update inline conditional depth tracking
@@ -61,6 +86,7 @@ impl Rule for IndentationWidth {
                     || trimmed_line.starts_with('}');
                 if !is_comma_continuation && !is_bracket_continuation
                     && !is_closing_token && inline_cond_depth == 0
+                    && entering_depth == 0  // skip lines inside bracket expressions
                 {
                     let start = ctx.line_start_offsets[i];
                     diags.push(Diagnostic {

@@ -2,6 +2,27 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct TernaryParentheses;
 
+/// Returns true if `s` contains a plain assignment `=` — not `==`, `!=`, `<=`, `>=`, `=>`,
+/// `=~`, `+=`, `-=`, `*=`, `/=`, `&=`, `|=`, `^=`, etc.
+fn contains_assignment(s: &[u8]) -> bool {
+    let n = s.len();
+    for i in 0..n {
+        if s[i] == b'=' {
+            let prev_ok = i == 0
+                || !matches!(
+                    s[i - 1],
+                    b'!' | b'<' | b'>' | b'=' | b'~' | b'+' | b'-' | b'*' | b'/' | b'&'
+                        | b'|' | b'^'
+                );
+            let next_ok = i + 1 >= n || s[i + 1] != b'=';
+            if prev_ok && next_ok {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 impl Rule for TernaryParentheses {
     fn name(&self) -> &'static str {
         "Style/TernaryParentheses"
@@ -46,6 +67,12 @@ impl Rule for TernaryParentheses {
                             prev.is_ascii_alphanumeric() || prev == b'_' || prev == b'?'
                         };
                         if !is_method_arg {
+                            // AllowSafeAssignment: skip `(var = expr) ?` — parens are required
+                            let inner = &bytes[open_pos + 1..close_pos];
+                            if contains_assignment(inner) {
+                                j = k;
+                                continue;
+                            }
                             let line_start = ctx.line_start_offsets[i];
                             diags.push(Diagnostic {
                                 rule: self.name(),

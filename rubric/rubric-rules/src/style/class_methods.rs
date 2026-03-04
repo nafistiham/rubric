@@ -125,6 +125,15 @@ fn is_other_block_opener(trimmed: &str) -> bool {
     if trimmed.ends_with(" do") || trimmed.contains(" do |") || trimmed.contains(" do\n") {
         return true;
     }
+    // Trailing `begin` at end of line (e.g. `@@x ||= begin`).
+    // This covers Ruby's inline begin..end expression form where `begin` appears
+    // as the last token on a line rather than at the start.  Without this check
+    // the matching `end` is consumed by the wrong scope entry and the stack
+    // falls out of sync, causing subsequent `def self.method` inside the same
+    // class to be mis-flagged as if they were inside a module.
+    if trimmed.ends_with(" begin") {
+        return true;
+    }
     false
 }
 

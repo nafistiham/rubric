@@ -15,10 +15,19 @@ impl Rule for SpaceInsideParens {
             let bytes = line.as_bytes();
             let len = bytes.len();
             let mut in_string: Option<u8> = None;
+            let mut in_regex = false;
 
             let mut j = 0;
             while j < len {
                 let b = bytes[j];
+
+                // Skip regex body — parens inside regex literals are not Ruby parens.
+                if in_regex {
+                    if b == b'\\' { j += 2; continue; }
+                    if b == b'/' { in_regex = false; }
+                    j += 1;
+                    continue;
+                }
 
                 match in_string {
                     Some(_) if b == b'\\' => { j += 2; continue; }
@@ -27,6 +36,17 @@ impl Rule for SpaceInsideParens {
                     None if b == b'"' || b == b'\'' => { in_string = Some(b); j += 1; continue; }
                     None if b == b'#' => break, // comment
                     None => {}
+                }
+
+                // Detect regex opener: `/` preceded by `=`, `(`, `,`, `[`, space, tab, or
+                // start-of-content. This avoids treating division `/` as a regex opener.
+                if b == b'/' && in_string.is_none() {
+                    let prev = if j > 0 { bytes[j - 1] } else { 0 };
+                    if matches!(prev, b'=' | b'(' | b',' | b'[' | b' ' | b'\t' | 0) {
+                        in_regex = true;
+                        j += 1;
+                        continue;
+                    }
                 }
 
                 // Detect `( ` — open paren followed by space (skip `()`)
