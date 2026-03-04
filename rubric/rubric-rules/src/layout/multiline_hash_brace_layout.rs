@@ -19,6 +19,22 @@ impl Rule for MultilineHashBraceLayout {
             if trimmed.ends_with('}') && !trimmed.starts_with('{') && trimmed.len() > 1 {
                 let closing_alone = trimmed == "}";
                 if !closing_alone {
+                    // If the line has as many (or more) `{` as `}`, the closing `}` is
+                    // matched by a `{` on the same line — single-line block, not a multiline
+                    // hash closer.  e.g. `format.all { super(**) }`, `-> { expr }`,
+                    // `@h = {}`, `#{interpolation}`.
+                    let open_count = trimmed.bytes().filter(|&b| b == b'{').count();
+                    let close_count = trimmed.bytes().filter(|&b| b == b'}').count();
+                    if open_count >= close_count {
+                        continue;
+                    }
+
+                    // Skip lines starting with `\` — these are inside multiline regex or
+                    // string literals (e.g. `\}\}` in a `/pattern/x` regex body).
+                    if trimmed.starts_with('\\') {
+                        continue;
+                    }
+
                     // Check if there's an opening `{` on a previous line
                     let mut j = i;
                     let mut is_multiline = false;
