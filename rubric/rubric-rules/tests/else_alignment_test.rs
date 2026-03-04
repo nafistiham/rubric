@@ -129,6 +129,96 @@ fn no_false_positive_for_inline_if_else_alignment() {
     assert!(diags.is_empty(), "inline = if else alignment falsely flagged: {:?}", diags);
 }
 
+// ── FP: assignment-if where `else` aligns with line base indent ───────────────
+// Pattern: `latency = if cond` — `else` at the line's leading indent, not the `if` column.
+// Both styles are valid Ruby; we must not flag either.
+#[test]
+fn no_false_positive_for_assignment_if_else_at_line_indent() {
+    // "          latency = if last_item" — indent=10, `if` at col 20.
+    // `else` at indent 10 (line base indent) is valid.
+    let src = concat!(
+        "def fetch\n",
+        "          latency = if last_item\n",
+        "            job = load(last_item)\n",
+        "            calculate(job)\n",
+        "          else\n",
+        "            0.0\n",
+        "          end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ElseAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "assignment-if else at line indent falsely flagged: {:?}", diags);
+}
+
+// ── FP: assignment-if with `elsif` at line base indent ───────────────────────
+// Pattern: `@mode = if ... elsif ... else ... end` where elsif/else align with
+// the line's leading indent, not the `if` keyword column.
+#[test]
+fn no_false_positive_for_assignment_if_elsif_at_line_indent() {
+    // "      @mode = if ..." — indent=6, `if` at col 14.
+    // `elsif` and `else` at indent 6 are valid.
+    let src = concat!(
+        "def compute_mode\n",
+        "      @mode = if weights.all?(&:zero?)\n",
+        "        :strict\n",
+        "      elsif weights.all? { |x| x == 1 }\n",
+        "        :random\n",
+        "      else\n",
+        "        :weighted\n",
+        "      end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ElseAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "assignment-if elsif at line indent falsely flagged: {:?}", diags);
+}
+
+// ── FP: assignment-if with nested if inside, outer else at line indent ────────
+// From sidekiq/api.rb — `@display_args ||= if klass == ...` followed by nested
+// `if/elsif/else/end` and then outer `else` at line indent.
+#[test]
+fn no_false_positive_for_assignment_if_with_nested_if_outer_else_at_line_indent() {
+    let src = concat!(
+        "def display_args\n",
+        "      @display_args ||= if klass == \"Wrapper\"\n",
+        "        job_args = self[\"wrapped\"] ? deserialize(args) : []\n",
+        "        if job_args == \"DeliveryJob\"\n",
+        "          job_args.drop(3)\n",
+        "        elsif job_args == \"MailDelivery\"\n",
+        "          job_args.drop(3).first\n",
+        "        else\n",
+        "          job_args\n",
+        "        end\n",
+        "      else\n",
+        "        args\n",
+        "      end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ElseAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "assignment-if with nested if outer else falsely flagged: {:?}", diags);
+}
+
+// ── FP: compound-assignment-if (`||=`) where `else` aligns with line indent ───
+#[test]
+fn no_false_positive_for_compound_assignment_if_else_at_line_indent() {
+    // "    @locale ||= if (l = ...) && ..." — indent=4, `if` at col 16.
+    // `else` at indent 4 (line base indent) is valid.
+    let src = concat!(
+        "def locale\n",
+        "    @locale ||= if (l = session[:locale]) && locales.include?(l)\n",
+        "      l\n",
+        "    else\n",
+        "      default_locale\n",
+        "    end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = ElseAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "compound assignment-if else at line indent falsely flagged: {:?}", diags);
+}
+
 // ── FP: `else` inside deeply nested if/do, stale state from outer context ────
 #[test]
 fn no_false_positive_for_stale_stack_state_across_methods() {

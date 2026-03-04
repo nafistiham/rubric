@@ -6,9 +6,15 @@ pub struct ElseAlignment;
 #[derive(Debug)]
 enum StackEntry {
     /// An `if`/`unless` block whose `else`/`elsif` we want to check.
-    /// Contains the column of the `if`/`unless` keyword (used as expected indent
-    /// for `else`/`elsif`).
-    If(usize),
+    ///
+    /// `primary` is the column of the `if`/`unless` keyword, used as the
+    /// expected indent for `else`/`elsif`.
+    ///
+    /// `alt` carries the line's leading-whitespace indent when `if`/`unless`
+    /// appears in an assignment context (`x = if cond`, `x ||= unless cond`).
+    /// In that pattern both the keyword column AND the line base indent are
+    /// accepted as valid alignment for `else`/`elsif`.
+    If { primary: usize, alt: Option<usize> },
     /// A `case` block — its `when`/`else` belongs to `case`, not to `if`.
     /// We do NOT flag `else` inside a `case` block.
     Case,
@@ -63,7 +69,7 @@ impl Rule for ElseAlignment {
         let lines = &ctx.lines;
         let n = lines.len();
 
-        // Unified stack of block openers. Each entry is If(col), Case, or Other.
+        // Unified stack of block openers. Each entry is If{..}, Case, or Other.
         // Every `end` pops exactly one entry, preserving correct interleaving.
         let mut stack: Vec<StackEntry> = Vec::new();
 
@@ -96,22 +102,30 @@ impl Rule for ElseAlignment {
             let t = trimmed.trim();
 
             // ── Detect `if`/`unless` openers ─────────────────────────────────
-            // Only push when the keyword starts the expression (trimmed line starts
-            // with `if `/`unless `). Inline forms like `x = if cond` are handled
-            // separately below.
+            // When the keyword starts the expression (trimmed line starts with
+            // `if `/`unless `), the `else`/`elsif` must align with the line's
+            // leading indent — which equals the keyword column.
             if t.starts_with("if ") || t.starts_with("unless ") {
-                stack.push(StackEntry::If(indent));
+                stack.push(StackEntry::If { primary: indent, alt: None });
             }
-            // Inline assignment `x = if cond` / `x ||= unless cond` — the `else`
-            // aligns with the `if`/`unless` keyword column, not the line's leading
-            // indent. Push with the column of `if`/`unless` on this line.
+            // Inline assignment `x = if cond` / `x ||= unless cond` — the
+            // `else`/`elsif` may align with EITHER the `if`/`unless` keyword
+            // column OR the line's base indent.  Both are accepted as valid.
             else if !t.starts_with("if ") && !t.starts_with("unless ") {
                 // Check for `= if ` / `= unless ` patterns
                 let inline_if_col = find_inline_keyword_col(t, "if");
                 let inline_unless_col = find_inline_keyword_col(t, "unless");
                 if let Some(col) = inline_if_col.or(inline_unless_col) {
-                    // Push as If with the column of the keyword (indent + col in trimmed)
-                    stack.push(StackEntry::If(indent + col));
+                    // `primary` = column of the `if`/`unless` keyword in the
+                    //   full line (used when `else` is aligned under the keyword).
+                    // `alt`     = line's leading indent (used when `else` is
+                    //   aligned under the start of the assignment).
+                    let keyword_col = indent + col;
+                    // Only record alt when keyword_col != indent (they differ
+                    // in assignment context; equal when the keyword is the first
+                    // non-whitespace token, which is handled by the branch above).
+                    let alt = if keyword_col != indent { Some(indent) } else { None };
+                    stack.push(StackEntry::If { primary: keyword_col, alt });
                 }
                 // ── Detect `case` openers (tracked separately from `if`) ──────
                 else if t.starts_with("case ") || t == "case" {
@@ -144,17 +158,18 @@ impl Rule for ElseAlignment {
             if t == "else" || t.starts_with("elsif ") || t == "elsif" {
                 // Check the top of the stack:
                 // - If the topmost entry is Case, this `else` belongs to `case` → skip.
-                // - If the topmost entry is If(col), check alignment.
-                // - If topmost is Other (a do/def/begin inside an if), walk down to find the if.
-                if let Some(expected_indent) = find_controlling_if_indent(&stack) {
-                    if indent != expected_indent {
+                // - If the topmost entry is If{primary,alt}, check alignment against both.
+                // - If topmost is Other (a do/def/begin inside an if), walk down.
+                if let Some((primary, alt)) = find_controlling_if_indent(&stack) {
+                    let valid = indent == primary || alt.map_or(false, |a| indent == a);
+                    if !valid {
                         let line_start = ctx.line_start_offsets[i] as usize;
                         let pos = (line_start + indent) as u32;
                         diags.push(Diagnostic {
                             rule: self.name(),
                             message: format!(
                                 "`else`/`elsif` at indent {} should be at {}.",
-                                indent, expected_indent
+                                indent, primary
                             ),
                             range: TextRange::new(pos, pos + trimmed.len() as u32),
                             severity: Severity::Warning,
@@ -180,12 +195,17 @@ impl Rule for ElseAlignment {
     }
 }
 
-/// Find the expected indent for `else`/`elsif` given the current stack.
+/// Find the expected indent(s) for `else`/`elsif` given the current stack.
+///
+/// Returns `Some((primary, alt))` where:
+/// - `primary` is the column of the `if`/`unless` keyword.
+/// - `alt` is `Some(line_indent)` when the `if` was in an assignment context,
+///   `None` otherwise.
 ///
 /// Rules:
 /// - Walk from the top of the stack.
 /// - If we hit a `Case` entry first → return `None` (this `else` belongs to `case`, skip check).
-/// - If we hit an `If(col)` entry first (possibly after some `Other` entries) → return `Some(col)`.
+/// - If we hit an `If{primary,alt}` entry first (possibly after some `Other` entries) → return it.
 /// - If stack is empty or only has `Other`/`Case` with no `If` above → return `None`.
 ///
 /// Walking past `Other` is correct because `do`/`def`/`begin` blocks can be nested INSIDE
@@ -197,10 +217,10 @@ impl Rule for ElseAlignment {
 /// else                   # else belongs to the if
 /// ```
 /// However, we must STOP at `Case` entries because `case`'s `else` belongs to `case`.
-fn find_controlling_if_indent(stack: &[StackEntry]) -> Option<usize> {
+fn find_controlling_if_indent(stack: &[StackEntry]) -> Option<(usize, Option<usize>)> {
     for entry in stack.iter().rev() {
         match entry {
-            StackEntry::If(col) => return Some(*col),
+            StackEntry::If { primary, alt } => return Some((*primary, *alt)),
             StackEntry::Case => return None, // else belongs to case, not to an if
             StackEntry::Other => {
                 // Keep walking — this Other is inside an if, and the else
