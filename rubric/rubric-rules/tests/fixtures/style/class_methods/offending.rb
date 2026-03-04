@@ -1,4 +1,4 @@
-class Foo
+module Foo
   def self.bar
     'bar'
   end
