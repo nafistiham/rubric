@@ -336,3 +336,87 @@ fn no_false_positive_for_inline_case_double_space() {
     let diags = EndAlignment.check_source(&ctx);
     assert!(diags.is_empty(), "inline case with double space falsely flagged: {:?}", diags);
 }
+
+// ── False positive: `end:` hash key (e.g., `end: 5,`) is NOT an `end` token ──
+// A hash key `end:` should not be treated as a Ruby `end` keyword.
+#[test]
+fn no_false_positive_for_end_colon_hash_key() {
+    let src = concat!(
+        "class X < Base\n",
+        "  class << self\n",
+        "    def tweet_entities\n",
+        "      {\n",
+        "        urls: [\n",
+        "          {\n",
+        "            start: 0,\n",
+        "            end: 5,\n",
+        "            url: url\n",
+        "          }\n",
+        "        ],\n",
+        "        hashtags: [\n",
+        "          {\n",
+        "            start: 0,\n",
+        "            end: 5,\n",
+        "            tag: 'foo'\n",
+        "          }\n",
+        "        ]\n",
+        "      }\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "end: hash key falsely flagged: {:?}", diags);
+}
+
+// ── False positive: multiline `raise` with `unless` on the continuation line ──
+// When a `raise` spans two lines with `\` continuation, the second line
+// starting with `unless` is a continuation, not a new `unless` block opener.
+#[test]
+fn no_false_positive_for_unless_on_continuation_line() {
+    let src = concat!(
+        "module Faker\n",
+        "  class Bird < Base\n",
+        "    class << self\n",
+        "      def common_name(tax_order = nil)\n",
+        "        if tax_order.nil?\n",
+        "          sample_value\n",
+        "        else\n",
+        "          raise TypeError, 'must be symbolizable' \\\n",
+        "            unless tax_order.respond_to?(:to_sym)\n",
+        "          translate(tax_order.to_sym)\n",
+        "        end\n",
+        "      end\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "unless on continuation line falsely flagged: {:?}", diags);
+}
+
+// ── False positive: inline `if` after arithmetic operator (`acc + if`) ────────
+// A do block containing `acc + if cond` has its `if` as an inline
+// expression that produces an `end`; that `end` must not consume the do frame.
+#[test]
+fn no_false_positive_for_inline_if_after_operator_in_do_block() {
+    let src = concat!(
+        "def cif_valid?(cif)\n",
+        "  if cif =~ regex\n",
+        "    total = chars.inject(0) do |acc, (el, idx)|\n",
+        "      acc + if idx.even?\n",
+        "               (el.to_i * 2).digits.inject(:+)\n",
+        "             else\n",
+        "               el.to_i\n",
+        "             end\n",
+        "    end\n",
+        "    total\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "inline if after operator in do block falsely flagged: {:?}", diags);
+}

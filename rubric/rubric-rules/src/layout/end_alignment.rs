@@ -77,6 +77,8 @@ fn extract_heredoc_terminator(line: &str) -> Option<String> {
 /// Returns true if `trimmed` starts with `end` followed by a non-identifier character
 /// (i.e., `end`, `end.foo`, `end,`, `end)`, `end]`, `end `, etc.).
 /// This catches all valid Ruby `end` tokens regardless of what follows.
+///
+/// Note: `end:` is a valid Ruby hash key (Symbol `end:`) and is NOT an `end` token.
 fn is_end_token(trimmed: &str) -> bool {
     if !trimmed.starts_with("end") {
         return false;
@@ -86,20 +88,23 @@ fn is_end_token(trimmed: &str) -> bool {
         return true; // bare "end"
     }
     let next = rest.as_bytes()[0];
-    // end followed by non-alphanumeric and non-underscore = valid end token
+    // end followed by non-alphanumeric and non-underscore = valid end token,
+    // EXCEPT `end:` which is a Symbol hash key, not a Ruby `end` keyword.
+    if next == b':' {
+        return false;
+    }
     !next.is_ascii_alphanumeric() && next != b'_'
 }
 
-/// Check whether a trimmed line contains an inline assignment of the form
-/// `lhs = if/unless/case/begin` (with any amount of whitespace around `=`).
-/// Also handles `<<` operator: `arr << if cond`.
-/// Returns true if any such pattern is found.
+/// Check whether a trimmed line contains an inline block opener of the form:
+/// - `lhs = if/unless/case/begin` (assignment + keyword)
+/// - `arr << if cond` (shovel operator + keyword)
+/// - `(if ...`, `(unless ...`, `(case ...` (parenthesised inline conditional)
+/// - `+ if`, `- if`, `| if`, `|| if`, `&& if`, etc. (arithmetic/logical operator + keyword)
+///
+/// These patterns open a multi-line `if/unless/case/begin` block mid-line whose
+/// `end` alignment is NOT checked by Layout/EndAlignment (rubocop skips inline ends).
 fn has_inline_block_opener(trimmed: &str) -> bool {
-    // Normalize: collapse multiple spaces into one for matching
-    // We look for patterns like `= if`, `= unless`, `= case`, `= begin`,
-    // `|| begin`, `&& begin`, `<< if`, etc.
-    // Strategy: scan for the keywords after = or << operators.
-
     // Check for `= if`, `= unless`, `= case` (with one or more spaces)
     for kw in &["if", "unless", "case"] {
         if contains_assign_kw(trimmed, kw) {
@@ -113,13 +118,10 @@ fn has_inline_block_opener(trimmed: &str) -> bool {
     // `<< if`, `<< unless`, `<< case`
     for kw in &["if", "unless", "case"] {
         let needle = format!("<< {}", kw);
-        if trimmed.contains(&needle) {
-            // Verify `kw` is followed by space or end of string
-            if let Some(pos) = trimmed.find(&needle) {
-                let after = &trimmed[pos + needle.len()..];
-                if after.is_empty() || after.starts_with(' ') {
-                    return true;
-                }
+        if let Some(pos) = trimmed.find(&needle) {
+            let after = &trimmed[pos + needle.len()..];
+            if after.is_empty() || after.starts_with(' ') {
+                return true;
             }
         }
     }
@@ -127,6 +129,22 @@ fn has_inline_block_opener(trimmed: &str) -> bool {
     for kw in &["if ", "unless ", "case "] {
         if trimmed.contains(&format!("({}", kw)) {
             return true;
+        }
+    }
+    // Arithmetic and logical operators before if/unless/case:
+    // e.g., `acc + if cond`, `val | if cond`, `x || if cond`, `x && if cond`
+    // We look for these specific operator patterns followed by the keyword with a word boundary.
+    for op in &[" + ", " - ", " * ", " / ", " | ", " & ", " || ", " && "] {
+        for kw in &["if", "unless", "case"] {
+            let needle = format!("{}{} ", op, kw);
+            if trimmed.contains(&needle) {
+                return true;
+            }
+            // keyword at end of line (body on next line)
+            let needle_eol = format!("{}{}", op, kw);
+            if trimmed.ends_with(&needle_eol) {
+                return true;
+            }
         }
     }
     false
@@ -187,6 +205,11 @@ impl Rule for EndAlignment {
         // Heredoc tracking: when inside a heredoc, skip all lines until the terminator.
         let mut in_heredoc: Option<String> = None;
 
+        // Continuation line tracking: if the previous non-comment, non-blank line ends
+        // with `\`, the current line is a continuation and should NOT be treated as a
+        // new block opener (e.g., `unless` on a continuation is not a new `unless` block).
+        let mut prev_line_continues = false;
+
         let mut i = 0;
         while i < n {
             let line = &lines[i];
@@ -208,28 +231,38 @@ impl Rule for EndAlignment {
                 // Fall through: the opener line itself still contains real Ruby syntax.
             }
 
-            // Skip comments
+            // Skip comments — also do not update prev_line_continues for comment lines.
             if trimmed.starts_with('#') {
                 i += 1;
                 continue;
             }
 
+            // A line is a continuation if the PREVIOUS non-comment, non-blank line
+            // ended with a backslash `\`.
+            let is_continuation = prev_line_continues;
+
+            // Update prev_line_continues for next iteration.
+            let bare = trimmed.trim_end();
+            prev_line_continues = bare.ends_with('\\');
+
             // Detect block/construct openers at the start of the trimmed line.
-            // Exclude: one-liners (`class Foo; end`), endless methods (`def foo = expr`).
+            // Exclude: one-liners (`class Foo; end`), endless methods (`def foo = expr`),
+            //          and continuation lines (a `unless` on a continuation line is not
+            //          a new block opener but part of the previous line's expression).
             //
             // IMPORTANT: `do` blocks are pushed with check=false (no alignment check).
             // Rubocop's Layout/EndAlignment does NOT check do-block end alignment;
             // that's the job of Layout/BlockAlignment. Pushing do-blocks as check=false
             // ensures their `end` tokens are consumed from the stack without generating
             // false diagnostics.
-            let is_do_block = !is_one_liner(trimmed) && (
+            let is_do_block = !is_continuation && !is_one_liner(trimmed) && (
                 trimmed == "do"
                 || trimmed.ends_with(" do")
                 || trimmed.contains(" do |")
                 || trimmed.contains(" do|")
             );
 
-            let is_keyword_opener = !is_one_liner(trimmed) && !is_endless_method(trimmed) && !is_do_block && (
+            let is_keyword_opener = !is_continuation && !is_one_liner(trimmed) && !is_endless_method(trimmed) && !is_do_block && (
                 trimmed.starts_with("def ") || trimmed == "def"
                 || trimmed.starts_with("private def ") || trimmed.starts_with("protected def ")
                 || trimmed.starts_with("private_class_method def ") || trimmed.starts_with("public_class_method def ")
@@ -242,7 +275,8 @@ impl Rule for EndAlignment {
 
             // Detect inline if/unless/case/begin assignments that open a block mid-line
             // Pattern: something = if condition  (or unless/case/begin, with any = variant: =, ||=, &&=, etc.)
-            let is_inline_opener = !is_keyword_opener && !is_do_block && has_inline_block_opener(trimmed);
+            // Also: arithmetic/logical operators before if/unless/case (e.g., `acc + if cond`)
+            let is_inline_opener = !is_continuation && !is_keyword_opener && !is_do_block && has_inline_block_opener(trimmed);
 
             if is_keyword_opener {
                 stack.push((indent, true));
