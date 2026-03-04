@@ -4,7 +4,15 @@
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::Path;
+
+/// Per-cop config parsed from e.g. `[rules."Style/Foo"] enabled = false`.
+#[derive(Debug, Deserialize, Default)]
+struct RawRuleConfig {
+    #[serde(default = "default_true")]
+    enabled: bool,
+}
 
 /// Intermediate struct that mirrors the raw TOML layout.
 /// `exclude` may appear either at the top level or under `[formatter]`.
@@ -16,12 +24,17 @@ struct RawConfig {
     formatter: RawFormatterConfig,
     #[serde(default)]
     exclude: Vec<String>,
+    /// Per-cop enable/disable table. Keys are cop names like "Style/StringLiterals".
+    #[serde(default)]
+    rules: HashMap<String, RawRuleConfig>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 struct RawLinterConfig {
     #[serde(default = "default_true")]
     enabled: bool,
+    #[serde(default)]
+    disabled_by_default: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -37,34 +50,51 @@ fn default_true() -> bool {
     true
 }
 
+/// Public per-cop config.
+#[derive(Debug)]
+pub struct RuleConfig {
+    pub enabled: bool,
+}
+
 #[derive(Debug)]
 pub struct Config {
     pub linter: LinterConfig,
     pub formatter: FormatterConfig,
     /// Exclude glob patterns — merged from top-level and `[formatter].exclude`.
     pub exclude: Vec<String>,
+    /// Per-cop enable/disable map. Keys are cop names like "Style/StringLiterals".
+    pub rules: HashMap<String, RuleConfig>,
 }
 
 #[derive(Debug)]
 pub struct LinterConfig {
-    // Will be read by rule-filtering logic in M3.
-    #[allow(dead_code)]
     pub enabled: bool,
+    pub disabled_by_default: bool,
 }
 
 #[derive(Debug)]
 pub struct FormatterConfig {
-    // Will be read by formatter dispatch logic in M3.
-    #[allow(dead_code)]
     pub enabled: bool,
+}
+
+impl Config {
+    /// Returns true if the named rule should run.
+    /// When `disabled_by_default` is set, unlisted rules return false.
+    pub fn is_rule_enabled(&self, name: &str) -> bool {
+        match self.rules.get(name) {
+            Some(r) => r.enabled,
+            None => !self.linter.disabled_by_default,
+        }
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            linter: LinterConfig { enabled: true },
+            linter: LinterConfig { enabled: true, disabled_by_default: false },
             formatter: FormatterConfig { enabled: true },
             exclude: Vec::new(),
+            rules: HashMap::new(),
         }
     }
 }
@@ -91,14 +121,20 @@ impl Config {
             raw.formatter.exclude
         };
 
+        let rules = raw.rules.into_iter()
+            .map(|(k, v)| (k, RuleConfig { enabled: v.enabled }))
+            .collect();
+
         Ok(Self {
             linter: LinterConfig {
                 enabled: raw.linter.enabled,
+                disabled_by_default: raw.linter.disabled_by_default,
             },
             formatter: FormatterConfig {
                 enabled: raw.formatter.enabled,
             },
             exclude,
+            rules,
         })
     }
 }
@@ -137,5 +173,58 @@ mod tests {
         let config = Config::load(dir.path()).expect("load");
         assert_eq!(config.linter.enabled, true);
         assert_eq!(config.formatter.enabled, true);
+    }
+
+    #[test]
+    fn config_load_parses_per_cop_rules() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let toml_path = dir.path().join("rubric.toml");
+        std::fs::write(
+            &toml_path,
+            r#"
+[rules."Style/StringLiterals"]
+enabled = false
+
+[rules."Layout/LineLength"]
+enabled = false
+"#,
+        )
+        .unwrap();
+
+        let config = Config::load(dir.path()).expect("load");
+        assert!(!config.is_rule_enabled("Style/StringLiterals"));
+        assert!(!config.is_rule_enabled("Layout/LineLength"));
+    }
+
+    #[test]
+    fn config_unknown_rule_defaults_to_enabled() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("rubric.toml"), "").unwrap();
+        let config = Config::load(dir.path()).expect("load");
+        assert!(config.is_rule_enabled("Style/UnknownCop"));
+    }
+
+    #[test]
+    fn config_rule_enabled_true_is_accepted() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            dir.path().join("rubric.toml"),
+            "[rules.\"Style/TrailingCommaInArguments\"]\nenabled = true\n",
+        )
+        .unwrap();
+        let config = Config::load(dir.path()).expect("load");
+        assert!(config.is_rule_enabled("Style/TrailingCommaInArguments"));
+    }
+
+    #[test]
+    fn config_disabled_by_default_skips_unlisted_rules() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            dir.path().join("rubric.toml"),
+            "[linter]\ndisabled_by_default = true\n\n[rules.\"Layout/TrailingWhitespace\"]\nenabled = true\n",
+        ).unwrap();
+        let config = Config::load(dir.path()).expect("load");
+        assert!(config.is_rule_enabled("Layout/TrailingWhitespace"));
+        assert!(!config.is_rule_enabled("Style/StringLiterals")); // not listed → disabled
     }
 }

@@ -113,6 +113,13 @@ fn apply_safe_fixes(
     Ok(total_fixed)
 }
 
+fn build_rules_with_config(config: &Config) -> Vec<Box<dyn Rule + Send + Sync>> {
+    build_rules()
+        .into_iter()
+        .filter(|r| config.is_rule_enabled(r.name()))
+        .collect()
+}
+
 fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
     vec![
         Box::new(TrailingWhitespace),
@@ -276,10 +283,15 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Check { path, fix } => {
-            let config = Config::load(&std::env::current_dir()?)?;
-            let _ = config; // will be used when rule registry is built
+            let config_dir = if path.is_dir() {
+                path.clone()
+            } else {
+                path.parent().unwrap_or(&path).to_path_buf()
+            };
+            let config = Config::load(&config_dir)
+                .or_else(|_| Config::load(&std::env::current_dir()?))?;
 
-            let rules = build_rules();
+            let rules = build_rules_with_config(&config);
 
             let files = runner::collect_ruby_files(&path);
             if files.is_empty() {
@@ -330,9 +342,8 @@ fn main() -> Result<()> {
 
         Commands::Fmt { path } => {
             let config = Config::load(&std::env::current_dir()?)?;
-            let _ = config;
 
-            let rules = build_rules();
+            let rules = build_rules_with_config(&config);
 
             let files = runner::collect_ruby_files(&path);
             if files.is_empty() {

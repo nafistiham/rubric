@@ -1,6 +1,7 @@
 //! `rubric migrate` — converts `.rubocop.yml` to `rubric.toml`.
 
 use anyhow::{Context, Result};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 pub(crate) const KNOWN_COPS: &[&str] = &[
@@ -159,6 +160,73 @@ pub(crate) const KNOWN_COPS: &[&str] = &[
     "Lint/Void",
 ];
 
+/// Recursively load cop `Enabled` settings from a rubocop yaml file and all
+/// its `inherit_from` references. Returns a map of cop_name → enabled.
+/// `base_dir` is the directory containing the file (for resolving relative paths).
+/// `visited` prevents infinite loops from circular references.
+fn load_enabled_from_yaml(
+    file_path: &Path,
+    base_dir: &Path,
+    visited: &mut HashSet<std::path::PathBuf>,
+) -> HashMap<String, bool> {
+    let canonical = base_dir.join(file_path);
+    if visited.contains(&canonical) {
+        return HashMap::new();
+    }
+    visited.insert(canonical.clone());
+
+    let content = match std::fs::read_to_string(&canonical) {
+        Ok(c) => c,
+        Err(_) => return HashMap::new(),
+    };
+    let yaml: serde_yaml::Value = match serde_yaml::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return HashMap::new(),
+    };
+    let mapping = match yaml.as_mapping() {
+        Some(m) => m,
+        None => return HashMap::new(),
+    };
+
+    // First load from inherited files (lower priority)
+    let mut result: HashMap<String, bool> = HashMap::new();
+    let canon_dir = canonical.parent().unwrap_or(base_dir);
+    if let Some(inherit) = mapping.get("inherit_from") {
+        let paths: Vec<String> = if let Some(arr) = inherit.as_sequence() {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        } else if let Some(s) = inherit.as_str() {
+            vec![s.to_string()]
+        } else {
+            vec![]
+        };
+        for p in paths {
+            let parent_cops = load_enabled_from_yaml(Path::new(&p), canon_dir, visited);
+            for (k, v) in parent_cops {
+                result.entry(k).or_insert(v); // parent fills in gaps
+            }
+        }
+    }
+
+    // Then overlay this file's own settings (higher priority)
+    for (key, value) in mapping {
+        let cop_name = match key.as_str() {
+            Some(s) if !matches!(
+                s,
+                "AllCops" | "inherit_from" | "require" | "inherit_gem"
+                    | "inherit_mode" | "plugins"
+            ) => s,
+            _ => continue,
+        };
+        if let Some(enabled) = value.get("Enabled").and_then(|v| v.as_bool()) {
+            result.insert(cop_name.to_string(), enabled);
+        }
+    }
+
+    result
+}
+
 pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
     let content = std::fs::read_to_string(rubocop_path)
         .with_context(|| format!("Could not read {}", rubocop_path.display()))?;
@@ -171,6 +239,33 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
             "{} is not a valid .rubocop.yml: expected a YAML mapping at the top level",
             rubocop_path.display()
         ))?;
+
+    // Check AllCops for DisabledByDefault
+    let disabled_by_default = mapping
+        .get("AllCops")
+        .and_then(|v| v.get("DisabledByDefault"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // Load all Enabled settings from inherited files
+    let rubocop_dir = rubocop_path.parent().unwrap_or(Path::new("."));
+    let mut visited = HashSet::new();
+    let mut all_enabled: HashMap<String, bool> = HashMap::new();
+    if let Some(inherit) = mapping.get("inherit_from") {
+        let paths: Vec<String> = if let Some(arr) = inherit.as_sequence() {
+            arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()
+        } else if let Some(s) = inherit.as_str() {
+            vec![s.to_string()]
+        } else {
+            vec![]
+        };
+        for p in paths {
+            let sub_cops = load_enabled_from_yaml(Path::new(&p), rubocop_dir, &mut visited);
+            for (k, v) in sub_cops {
+                all_enabled.entry(k).or_insert(v);
+            }
+        }
+    }
 
     let mut known_lines = Vec::<String>::new();
     let mut unknown_lines = Vec::<String>::new();
@@ -190,6 +285,7 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
             let enabled = value
                 .get("Enabled")
                 .and_then(|v| v.as_bool())
+                .or_else(|| all_enabled.get(cop_name).copied())
                 .unwrap_or(true); // RuboCop defaults to enabled when key is absent
             known_lines.push(format!(
                 "[rules.\"{cop_name}\"]\nenabled = {enabled}"
@@ -201,10 +297,29 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
         }
     }
 
+    // Emit cops that are only in inherited files (not in top-level .rubocop.yml)
+    for (cop_name, enabled) in &all_enabled {
+        // Skip if already emitted from the top-level file
+        if mapping.contains_key(cop_name.as_str()) {
+            continue;
+        }
+        // Skip non-cop top-level keys
+        if matches!(cop_name.as_str(), "AllCops" | "inherit_from" | "require" | "inherit_gem") {
+            continue;
+        }
+        if KNOWN_COPS.contains(&cop_name.as_str()) {
+            known_lines.push(format!("[rules.\"{cop_name}\"]\nenabled = {enabled}"));
+        }
+    }
+
     // Build the output TOML
     let mut output = String::new();
     output.push_str("# Generated by `rubric migrate` from .rubocop.yml\n\n");
-    output.push_str("[linter]\nenabled = true\n\n");
+    if disabled_by_default {
+        output.push_str("[linter]\nenabled = true\ndisabled_by_default = true\n\n");
+    } else {
+        output.push_str("[linter]\nenabled = true\n\n");
+    }
     output.push_str("[formatter]\nenabled = true\n\n");
 
     if !known_lines.is_empty() {
@@ -300,6 +415,29 @@ Metrics/MethodLength:
     }
 
     #[test]
+    fn allcops_disabled_by_default_is_emitted() {
+        let dir = TempDir::new().unwrap();
+        let rubocop_yml = dir.path().join(".rubocop.yml");
+        let rubric_toml = dir.path().join("rubric.toml");
+
+        fs::write(
+            &rubocop_yml,
+            r#"AllCops:
+  DisabledByDefault: true
+
+Layout/TrailingWhitespace:
+  Enabled: true
+"#,
+        ).unwrap();
+
+        run(&rubocop_yml, &rubric_toml).unwrap();
+
+        let output = fs::read_to_string(&rubric_toml).unwrap();
+        assert!(output.contains("disabled_by_default = true"), "expected disabled_by_default in output:\n{output}");
+        assert!(output.contains("[rules.\"Layout/TrailingWhitespace\"]\nenabled = true"));
+    }
+
+    #[test]
     fn allcops_key_is_skipped() {
         let dir = TempDir::new().unwrap();
         let rubocop_yml = dir.path().join(".rubocop.yml");
@@ -324,5 +462,41 @@ Layout/TrailingWhitespace:
         let output = fs::read_to_string(&rubric_toml).unwrap();
         assert!(!output.contains("AllCops"));
         assert!(output.contains("[rules.\"Layout/TrailingWhitespace\"]"));
+    }
+
+    #[test]
+    fn inherit_from_files_are_merged() {
+        let dir = TempDir::new().unwrap();
+        let rubocop_yml = dir.path().join(".rubocop.yml");
+        let rubric_toml = dir.path().join("rubric.toml");
+        let sub_dir = dir.path().join(".rubocop");
+        fs::create_dir(&sub_dir).unwrap();
+        let sub_yml = sub_dir.join("style.yml");
+
+        // Sub-file disables ClassAndModuleChildren (a known cop)
+        fs::write(
+            &sub_yml,
+            "Style/ClassAndModuleChildren:\n  Enabled: false\n",
+        ).unwrap();
+
+        // Top-level file inherits from sub-file
+        fs::write(
+            &rubocop_yml,
+            "inherit_from:\n  - .rubocop/style.yml\n\nLayout/TrailingWhitespace:\n  Enabled: true\n",
+        ).unwrap();
+
+        run(&rubocop_yml, &rubric_toml).unwrap();
+
+        let output = fs::read_to_string(&rubric_toml).unwrap();
+        // The inherited disabled cop should appear in rubric.toml
+        assert!(
+            output.contains("[rules.\"Style/ClassAndModuleChildren\"]\nenabled = false"),
+            "expected inherited disabled cop in output:\n{output}"
+        );
+        // The top-level cop should still be there
+        assert!(
+            output.contains("[rules.\"Layout/TrailingWhitespace\"]\nenabled = true"),
+            "expected top-level cop in output:\n{output}"
+        );
     }
 }
