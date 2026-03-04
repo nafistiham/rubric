@@ -232,6 +232,14 @@ impl Rule for SpaceAroundOperators {
                         || two == b"&&" || two == b"||" || two == b"+=" || two == b"-="
                         || two == b"*=" || two == b"/="
                     {
+                        // Skip <<= (left-shift-assign): when we see `<=` preceded by `<`
+                        // Skip >>= (right-shift-assign): when we see `>=` preceded by `>`
+                        if (two == b"<=" && j > 0 && bytes[j-1] == b'<')
+                            || (two == b">=" && j > 0 && bytes[j-1] == b'>')
+                        {
+                            j += 2;
+                            continue;
+                        }
                         // Skip operator symbols: :<=, :>=, :==, :!=, :&&, :||
                         if j > 0 && bytes[j-1] == b':' {
                             j += 2;
@@ -261,7 +269,10 @@ impl Rule for SpaceAroundOperators {
                     b'=' => {
                         let prev = if j > 0 { bytes[j-1] } else { 0 };
                         // Skip trailing char of !=, <=, >=, ==
-                        if prev == b'!' || prev == b'<' || prev == b'>' || prev == b'=' {
+                        // Also skip compound assignment operators: |=, &=, ^=
+                        if prev == b'!' || prev == b'<' || prev == b'>' || prev == b'='
+                            || prev == b'|' || prev == b'&' || prev == b'^'
+                        {
                             j += 1;
                             continue;
                         }

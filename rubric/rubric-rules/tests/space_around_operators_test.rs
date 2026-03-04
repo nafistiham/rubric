@@ -315,3 +315,66 @@ fn no_false_positive_for_question_slash_char_literal() {
     let diags = SpaceAroundOperators.check_source(&ctx);
     assert!(diags.is_empty(), "?/ char literal falsely flagged: {:?}", diags);
 }
+
+// ── False positive: |= compound assignment ───────────────────────────────────
+#[test]
+fn no_false_positive_for_bitor_assign() {
+    let src = "flags |= value\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "|= falsely flagged: {:?}", diags);
+}
+
+// ── False positive: += compound assignment ───────────────────────────────────
+#[test]
+fn no_false_positive_for_plus_assign() {
+    let src = "x += 1\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "+= falsely flagged: {:?}", diags);
+}
+
+// ── False positive: <<= compound assignment ──────────────────────────────────
+#[test]
+fn no_false_positive_for_left_shift_assign() {
+    let src = "flags <<= 2\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "<<= falsely flagged: {:?}", diags);
+}
+
+// ── False positive: &= compound assignment ───────────────────────────────────
+#[test]
+fn no_false_positive_for_bitand_assign() {
+    let src = "flags &= mask\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "&= falsely flagged: {:?}", diags);
+}
+
+// ── False positive: ^= compound assignment ───────────────────────────────────
+#[test]
+fn no_false_positive_for_xor_assign() {
+    let src = "flags ^= mask\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "^= falsely flagged: {:?}", diags);
+}
+
+// ── False positive: %= compound assignment ───────────────────────────────────
+#[test]
+fn no_false_positive_for_mod_assign() {
+    let src = "x %= 3\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "%= falsely flagged: {:?}", diags);
+}
+
+// ── True positive: bare = without spaces is still flagged ────────────────────
+#[test]
+fn detects_bare_eq_without_spaces() {
+    let src = "x=1\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(!diags.is_empty(), "x=1 should be flagged for missing spaces around =");
+}
