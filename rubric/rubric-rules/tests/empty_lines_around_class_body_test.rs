@@ -21,3 +21,13 @@ fn no_violation_for_clean_class_body() {
     let diags = EmptyLinesAroundClassBody.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_single_line_nested_class() {
+    // `class Error < StandardError; end` on one line is not a multi-line body opener.
+    // An empty line after it must not trigger "Extra empty line after class body start".
+    let src = "class Outer\n  class Error < StandardError; end\n\n  def foo\n    1\n  end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EmptyLinesAroundClassBody.check_source(&ctx);
+    assert!(diags.is_empty(), "single-line nested class should not be flagged, got: {:?}", diags);
+}

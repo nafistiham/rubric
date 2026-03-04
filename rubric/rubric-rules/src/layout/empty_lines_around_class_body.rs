@@ -20,6 +20,12 @@ impl Rule for EmptyLinesAroundClassBody {
             let trimmed = lines[i].trim();
 
             if trimmed.starts_with("class ") || trimmed == "class" {
+                // Skip single-line class definitions: `class Foo < Bar; end`
+                // These close on the same line — no multi-line body to check.
+                if trimmed.ends_with("; end") {
+                    i += 1;
+                    continue;
+                }
                 // Check if the next line is blank (empty line after class declaration)
                 if i + 1 < n && lines[i + 1].trim().is_empty() {
                     let line_start = ctx.line_start_offsets[i + 1];
