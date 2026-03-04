@@ -62,3 +62,32 @@ fn no_false_positive_for_balanced_parens_on_line() {
     let diags = MultilineMethodCallBraceLayout.check_source(&ctx);
     assert!(diags.is_empty(), "balanced parens on line falsely flagged: {:?}", diags);
 }
+
+// ── FP: commented-out code — line starting with `#` ──────────────────────────
+#[test]
+fn no_false_positive_for_comment_line() {
+    let src = concat!(
+        "# ApplicationController.renderer.defaults.merge!(\n",
+        "#   http_host: 'example.org',\n",
+        "#   https: false\n",
+        "# )\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = MultilineMethodCallBraceLayout.check_source(&ctx);
+    assert!(diags.is_empty(), "commented-out `)` falsely flagged: {:?}", diags);
+}
+
+// ── FP: `})` closing both a hash arg and the method call — symmetrical style ──
+// `expect(subject).to include({...})` — rubocop symmetrical style allows this
+#[test]
+fn no_false_positive_for_hash_arg_closing_paren() {
+    let src = concat!(
+        "expect(subject).to include({\n",
+        "  'type' => 'Create',\n",
+        "  'actor' => tag_manager.uri_for(account),\n",
+        "})\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = MultilineMethodCallBraceLayout.check_source(&ctx);
+    assert!(diags.is_empty(), "`}}` before `)` falsely flagged: {:?}", diags);
+}
