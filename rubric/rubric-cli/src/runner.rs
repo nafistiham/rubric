@@ -43,6 +43,13 @@ pub fn run_all_files(
                 diagnostics.extend(ast_diags);
             }
 
+            // Post-processing: honour # rubocop:disable / # rubocop:enable directives
+            let diagnostics = rubric_core::filter_disabled_by_directives(
+                &source,
+                diagnostics,
+                &ctx.line_start_offsets,
+            );
+
             Some((path.clone(), source, diagnostics))
         })
         .collect()
