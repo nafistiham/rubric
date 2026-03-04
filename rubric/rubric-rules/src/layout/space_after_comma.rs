@@ -2,6 +2,35 @@ use rubric_core::{Diagnostic, Fix, FixSafety, LintContext, Rule, Severity, TextE
 
 pub struct SpaceAfterComma;
 
+/// Returns true when a `/` at position `j` in `line_bytes` is the start of a
+/// regex literal rather than the division operator.
+///
+/// Heuristic: `/` starts a regex when the last meaningful token before it is an
+/// operator, keyword, opening bracket, or when the position is at the start of
+/// expression context.  It is a division operator when the preceding token is
+/// an identifier-end character, `)`, `]`, a digit, or `_`.
+fn slash_starts_regex(line_bytes: &[u8], j: usize) -> bool {
+    // Scan backwards for the last non-whitespace byte before j
+    let mut k = j;
+    loop {
+        if k == 0 {
+            // Nothing before — start of line — treat as regex
+            return true;
+        }
+        k -= 1;
+        let b = line_bytes[k];
+        if b == b' ' || b == b'\t' {
+            continue;
+        }
+        // Identifier end characters / closing brackets mean division
+        if b.is_ascii_alphanumeric() || b == b'_' || b == b')' || b == b']' {
+            return false;
+        }
+        // Everything else (operators, opening brackets, commas, etc.) means regex
+        return true;
+    }
+}
+
 impl Rule for SpaceAfterComma {
     fn name(&self) -> &'static str {
         "Layout/SpaceAfterComma"
@@ -17,9 +46,71 @@ impl Rule for SpaceAfterComma {
             let line_start = ctx.line_start_offsets[i] as usize;
             let line_bytes = line.as_bytes();
             let mut in_string: Option<u8> = None; // None = outside, Some(delim) = inside string
+            let mut in_regex = false; // inside /regex/
+            let mut in_percent_regex = false; // inside %r{...}
+            let mut percent_regex_depth: usize = 0; // brace depth inside %r{
             let mut j = 0;
             while j < line_bytes.len() {
                 let b = line_bytes[j];
+
+                // ── Inside %r{...} ─────────────────────────────────────────
+                if in_percent_regex {
+                    if b == b'\\' {
+                        j += 2;
+                        continue;
+                    }
+                    if b == b'{' {
+                        percent_regex_depth += 1;
+                        j += 1;
+                        continue;
+                    }
+                    if b == b'}' {
+                        if percent_regex_depth == 0 {
+                            in_percent_regex = false;
+                        } else {
+                            percent_regex_depth -= 1;
+                        }
+                        j += 1;
+                        continue;
+                    }
+                    // Any other byte (including comma) — skip
+                    j += 1;
+                    continue;
+                }
+
+                // ── Inside /regex/ ─────────────────────────────────────────
+                if in_regex {
+                    if b == b'\\' {
+                        j += 2;
+                        continue;
+                    }
+                    if b == b'[' {
+                        // Character class — skip until closing ]
+                        j += 1;
+                        while j < line_bytes.len() {
+                            if line_bytes[j] == b'\\' {
+                                j += 2;
+                                continue;
+                            }
+                            if line_bytes[j] == b']' {
+                                j += 1;
+                                break;
+                            }
+                            j += 1;
+                        }
+                        continue;
+                    }
+                    if b == b'/' {
+                        in_regex = false;
+                        j += 1;
+                        continue;
+                    }
+                    // Any other byte (including comma) — skip
+                    j += 1;
+                    continue;
+                }
+
+                // ── Inside a string ────────────────────────────────────────
                 match in_string {
                     Some(_) if b == b'\\' => { j += 2; continue; } // skip escaped char
                     Some(b'"') if b == b'#' && j + 1 < line_bytes.len() && line_bytes[j + 1] == b'{' => {
@@ -53,9 +144,27 @@ impl Rule for SpaceAfterComma {
                     }
                     Some(delim) if b == delim => { in_string = None; }
                     Some(_) => {}
-                    // Outside a string
+
+                    // ── Outside strings and regex ──────────────────────────
                     None if b == b'"' || b == b'\'' || b == b'`' => { in_string = Some(b); }
                     None if b == b'#' => break, // inline comment — stop scanning
+                    // Detect %r{ percent-regex
+                    None if b == b'%'
+                        && j + 2 < line_bytes.len()
+                        && line_bytes[j + 1] == b'r'
+                        && line_bytes[j + 2] == b'{' =>
+                    {
+                        in_percent_regex = true;
+                        percent_regex_depth = 0;
+                        j += 3; // skip %r{
+                        continue;
+                    }
+                    // Detect /regex/ start
+                    None if b == b'/' && slash_starts_regex(line_bytes, j) => {
+                        in_regex = true;
+                        j += 1;
+                        continue;
+                    }
                     None if b == b',' => {
                         let next = line_bytes.get(j + 1).copied();
                         if next != Some(b' ') && next != Some(b'\t') && next.is_some() {
