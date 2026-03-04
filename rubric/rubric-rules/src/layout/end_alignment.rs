@@ -38,6 +38,133 @@ fn is_one_liner(trimmed: &str) -> bool {
     trimmed.trim_end_matches(|c: char| c == ' ' || c == '\t').ends_with("; end")
 }
 
+/// Extracts the heredoc terminator word from a line containing `<<`, `<<-`, or `<<~`.
+/// Returns `None` if the line does not open a heredoc.
+fn extract_heredoc_terminator(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut in_str: Option<u8> = None;
+    let mut i = 0;
+    while i + 1 < len {
+        match in_str {
+            Some(_) if bytes[i] == b'\\' => { i += 2; continue; }
+            Some(d) if bytes[i] == d => { in_str = None; i += 1; continue; }
+            Some(_) => { i += 1; continue; }
+            None if bytes[i] == b'"' || bytes[i] == b'\'' => {
+                in_str = Some(bytes[i]); i += 1; continue;
+            }
+            None if bytes[i] == b'#' => break,
+            None => {}
+        }
+        if bytes[i] == b'<' && bytes[i + 1] == b'<' {
+            let mut j = i + 2;
+            if j < len && (bytes[j] == b'-' || bytes[j] == b'~') { j += 1; }
+            let quote = if j < len && matches!(bytes[j], b'\'' | b'"' | b'`') {
+                let q = bytes[j]; j += 1; Some(q)
+            } else { None };
+            let _ = quote;
+            let start = j;
+            while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') { j += 1; }
+            if j > start {
+                return Some(line[start..j].to_string());
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Returns true if `trimmed` starts with `end` followed by a non-identifier character
+/// (i.e., `end`, `end.foo`, `end,`, `end)`, `end]`, `end `, etc.).
+/// This catches all valid Ruby `end` tokens regardless of what follows.
+fn is_end_token(trimmed: &str) -> bool {
+    if !trimmed.starts_with("end") {
+        return false;
+    }
+    let rest = &trimmed[3..];
+    if rest.is_empty() {
+        return true; // bare "end"
+    }
+    let next = rest.as_bytes()[0];
+    // end followed by non-alphanumeric and non-underscore = valid end token
+    !next.is_ascii_alphanumeric() && next != b'_'
+}
+
+/// Check whether a trimmed line contains an inline assignment of the form
+/// `lhs = if/unless/case/begin` (with any amount of whitespace around `=`).
+/// Also handles `<<` operator: `arr << if cond`.
+/// Returns true if any such pattern is found.
+fn has_inline_block_opener(trimmed: &str) -> bool {
+    // Normalize: collapse multiple spaces into one for matching
+    // We look for patterns like `= if`, `= unless`, `= case`, `= begin`,
+    // `|| begin`, `&& begin`, `<< if`, etc.
+    // Strategy: scan for the keywords after = or << operators.
+
+    // Check for `= if`, `= unless`, `= case` (with one or more spaces)
+    for kw in &["if", "unless", "case"] {
+        if contains_assign_kw(trimmed, kw) {
+            return true;
+        }
+    }
+    // `= begin` at end of line or followed by space
+    if trimmed.contains("= begin") || trimmed.contains("|| begin") || trimmed.contains("&& begin") {
+        return true;
+    }
+    // `<< if`, `<< unless`, `<< case`
+    for kw in &["if", "unless", "case"] {
+        let needle = format!("<< {}", kw);
+        if trimmed.contains(&needle) {
+            // Verify `kw` is followed by space or end of string
+            if let Some(pos) = trimmed.find(&needle) {
+                let after = &trimmed[pos + needle.len()..];
+                if after.is_empty() || after.starts_with(' ') {
+                    return true;
+                }
+            }
+        }
+    }
+    // `(if ...`, `(unless ...`, `(case ...` — parenthesised inline conditional
+    for kw in &["if ", "unless ", "case "] {
+        if trimmed.contains(&format!("({}", kw)) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Returns true if `trimmed` contains `= kw` (with any amount of whitespace between)
+/// where `kw` is followed by a space or is at end of line.
+fn contains_assign_kw(trimmed: &str, kw: &str) -> bool {
+    // Look for `=` followed by optional spaces followed by `kw` followed by space or EOL
+    let bytes = trimmed.as_bytes();
+    let n = bytes.len();
+    let kw_bytes = kw.as_bytes();
+    let kw_len = kw_bytes.len();
+
+    let mut i = 0;
+    while i < n {
+        if bytes[i] == b'=' && (i == 0 || bytes[i - 1] != b'!' && bytes[i - 1] != b'<' && bytes[i - 1] != b'>') {
+            // Skip past optional `=` in `==`, `=>`, `=~`
+            if i + 1 < n && (bytes[i + 1] == b'=' || bytes[i + 1] == b'>' || bytes[i + 1] == b'~') {
+                i += 1;
+                continue;
+            }
+            // Skip spaces after `=`
+            let mut j = i + 1;
+            while j < n && bytes[j] == b' ' { j += 1; }
+            // Check if kw matches at position j
+            if j + kw_len <= n && &bytes[j..j + kw_len] == kw_bytes {
+                let after_kw = j + kw_len;
+                if after_kw >= n || bytes[after_kw] == b' ' || bytes[after_kw] == b'\n' {
+                    return true;
+                }
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 impl Rule for EndAlignment {
     fn name(&self) -> &'static str {
         "Layout/EndAlignment"
@@ -49,15 +176,37 @@ impl Rule for EndAlignment {
         let n = lines.len();
 
         // Unified stack: (indent, check_alignment)
-        // check_alignment=true  → block opener at line start (if/while/def/class/do/begin)
-        // check_alignment=false → inline opener mid-line (= if / = begin / etc.)
+        // check_alignment=true  → block opener at line start (if/while/def/class/begin)
+        //                         whose `end` alignment we WANT to check
+        // check_alignment=false → do-block openers or inline openers (= if / = begin / etc.)
+        //                         whose `end` alignment we do NOT check
+        //                         (rubocop's EndAlignment does not check `do`-block ends;
+        //                          those are covered by Layout/BlockAlignment)
         let mut stack: Vec<(usize, bool)> = Vec::new();
+
+        // Heredoc tracking: when inside a heredoc, skip all lines until the terminator.
+        let mut in_heredoc: Option<String> = None;
 
         let mut i = 0;
         while i < n {
             let line = &lines[i];
             let trimmed = line.trim_start();
             let indent = line.len() - trimmed.len();
+
+            // Skip heredoc body lines — Ruby keywords inside heredocs are string content.
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim() == term.as_str() {
+                    in_heredoc = None;
+                }
+                i += 1;
+                continue;
+            }
+
+            // Detect heredoc opener on this line — body starts on the NEXT line.
+            if let Some(term) = extract_heredoc_terminator(line) {
+                in_heredoc = Some(term);
+                // Fall through: the opener line itself still contains real Ruby syntax.
+            }
 
             // Skip comments
             if trimmed.starts_with('#') {
@@ -67,39 +216,47 @@ impl Rule for EndAlignment {
 
             // Detect block/construct openers at the start of the trimmed line.
             // Exclude: one-liners (`class Foo; end`), endless methods (`def foo = expr`).
-            let is_block_opener = !is_one_liner(trimmed) && !is_endless_method(trimmed) && (
+            //
+            // IMPORTANT: `do` blocks are pushed with check=false (no alignment check).
+            // Rubocop's Layout/EndAlignment does NOT check do-block end alignment;
+            // that's the job of Layout/BlockAlignment. Pushing do-blocks as check=false
+            // ensures their `end` tokens are consumed from the stack without generating
+            // false diagnostics.
+            let is_do_block = !is_one_liner(trimmed) && (
+                trimmed == "do"
+                || trimmed.ends_with(" do")
+                || trimmed.contains(" do |")
+                || trimmed.contains(" do|")
+            );
+
+            let is_keyword_opener = !is_one_liner(trimmed) && !is_endless_method(trimmed) && !is_do_block && (
                 trimmed.starts_with("def ") || trimmed == "def"
                 || trimmed.starts_with("private def ") || trimmed.starts_with("protected def ")
+                || trimmed.starts_with("private_class_method def ") || trimmed.starts_with("public_class_method def ")
                 || trimmed.starts_with("class ") || trimmed.starts_with("module ")
                 || trimmed.starts_with("if ") || trimmed.starts_with("unless ")
                 || trimmed.starts_with("while ") || trimmed.starts_with("until ")
                 || trimmed.starts_with("for ") || trimmed == "begin"
                 || trimmed.starts_with("begin ") || trimmed.starts_with("case ")
-                || trimmed == "do" || trimmed.ends_with(" do") || trimmed.contains(" do |") || trimmed.contains(" do|")
             );
 
             // Detect inline if/unless/case/begin assignments that open a block mid-line
             // Pattern: something = if condition  (or unless/case/begin, with any = variant: =, ||=, &&=, etc.)
-            let is_inline_opener = !is_block_opener && (
-                // Any assignment operator (=, ||=, &&=, +=, etc.) followed by if/unless/case
-                (trimmed.contains("= if ") || trimmed.contains("= unless ") || trimmed.contains("= case "))
-                || (trimmed.contains(" << if ") || trimmed.contains(" << unless ") || trimmed.contains(" << case "))
-                || (trimmed.contains("(if ") || trimmed.contains("(unless ") || trimmed.contains("(case "))
-                // `var = begin` / `var ||= begin` / `x || begin` — inline begin/rescue/end block
-                || trimmed.ends_with("= begin") || trimmed.ends_with("|| begin") || trimmed.ends_with("&& begin")
-                || trimmed.contains("= begin ")
-            );
+            let is_inline_opener = !is_keyword_opener && !is_do_block && has_inline_block_opener(trimmed);
 
-            if is_block_opener {
+            if is_keyword_opener {
                 stack.push((indent, true));
+            } else if is_do_block {
+                // Push with check=false: we track the frame for correct end-consumption,
+                // but do NOT flag misaligned ends.
+                stack.push((indent, false));
             } else if is_inline_opener {
                 stack.push((indent, false));
             }
 
-            // Detect end (including end.method chaining and end followed by other tokens)
-            let is_end = trimmed == "end"
-                || trimmed.starts_with("end ")
-                || trimmed.starts_with("end.");
+            // Detect end tokens: `end` followed by any non-identifier character
+            // (covers: end, end.foo, end,, end), end], end if, etc.)
+            let is_end = is_end_token(trimmed);
 
             if is_end {
                 if let Some((expected_indent, check)) = stack.pop() {

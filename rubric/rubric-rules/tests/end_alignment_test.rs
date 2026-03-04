@@ -207,3 +207,132 @@ fn no_false_positive_for_inline_if_with_nested_inline_begin() {
     let diags = EndAlignment.check_source(&ctx);
     assert!(diags.is_empty(), "nested inline begin in inline if falsely flagged: {:?}", diags);
 }
+
+// ── False positive: `end,` inside a hash/array (e.g., `top_hashtags.map do ... end,`) ──
+// `end` followed by `,` should be recognized as a valid `end` token and pop the stack.
+#[test]
+fn no_false_positive_for_end_comma_in_hash() {
+    let src = concat!(
+        "class Report\n",
+        "  def generate\n",
+        "    {\n",
+        "      items: list.map do |(name, count)|\n",
+        "               { name: name, count: count }\n",
+        "             end,\n",
+        "    }\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "end, in hash falsely flagged: {:?}", diags);
+}
+
+// ── False positive: `end)` inside a method call argument ─────────────────────
+// `end` followed by `)` should be recognized as a valid `end` token.
+#[test]
+fn no_false_positive_for_end_paren() {
+    let src = concat!(
+        "def foo\n",
+        "  result = bar(list.each_with_object([]) do |item, acc|\n",
+        "    acc << item\n",
+        "  end).compact\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "end) falsely flagged: {:?}", diags);
+}
+
+// ── False positive: `do` block `end` — EndAlignment does not check do-block ends ──
+// Rubocop's Layout/EndAlignment skips do-block end alignment (that's BlockAlignment).
+// `end` for a `do` block should never generate an EndAlignment diagnostic.
+#[test]
+fn no_false_positive_for_do_block_end_misaligned_style() {
+    // In this style, `end` aligns with the expression start (source_list),
+    // not the `do` keyword column.
+    let src = concat!(
+        "def rewrite!\n",
+        "  source_list\n",
+        "    .where(active: true)\n",
+        "    .in_batches do |batch|\n",
+        "      process(batch)\n",
+        "    end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "do-block end alignment falsely flagged: {:?}", diags);
+}
+
+// ── False positive: multiple `do` blocks with the class/module closer ────────
+// Many `do` blocks in a file must not corrupt the stack so that
+// the class/module `end` is flagged.
+#[test]
+fn no_false_positive_for_multiple_do_blocks() {
+    let src = concat!(
+        "module BulkConcern\n",
+        "  def push_bulk(args_array)\n",
+        "    Client.push_bulk({\n",
+        "      'args' => args_array.map do |args|\n",
+        "        [args]\n",
+        "      end,\n",
+        "    })\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "multiple do blocks falsely flagged: {:?}", diags);
+}
+
+// ── False positive: heredoc body containing `end` (e.g., SQL CASE ... END) ───
+#[test]
+fn no_false_positive_for_end_in_heredoc_body() {
+    let src = concat!(
+        "module Search\n",
+        "  SQL = <<~SQL.squish\n",
+        "    SELECT\n",
+        "      case when x IS NULL then 0\n",
+        "           else 1\n",
+        "      end\n",
+        "    FROM accounts\n",
+        "  SQL\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "end inside heredoc body falsely flagged: {:?}", diags);
+}
+
+// ── False positive: `private_class_method def` opener ────────────────────────
+#[test]
+fn no_false_positive_for_private_class_method_def() {
+    let src = concat!(
+        "module MyHelper\n",
+        "  private_class_method def self.helper_method(x)\n",
+        "    x * 2\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "private_class_method def falsely flagged: {:?}", diags);
+}
+
+// ── False positive: inline `case` with extra whitespace `=  case` ────────────
+#[test]
+fn no_false_positive_for_inline_case_double_space() {
+    let src = concat!(
+        "def name\n",
+        "  result =  case @type\n",
+        "             when :a then 'foo'\n",
+        "             else 'bar'\n",
+        "             end\n",
+        "  result\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = EndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "inline case with double space falsely flagged: {:?}", diags);
+}
