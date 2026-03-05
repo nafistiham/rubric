@@ -2,150 +2,177 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct UnusedMethodArgument;
 
+/// Collect (name_bytes, name_start, name_end) for all named parameters in a
+/// `ParametersNode`.  Anonymous params (`*`, `**`, `&`) produce no entry.
+fn collect_method_params(params: &ruby_prism::ParametersNode<'_>) -> Vec<(Vec<u8>, u32, u32)> {
+    let mut result: Vec<(Vec<u8>, u32, u32)> = Vec::new();
+
+    // Required positional: def foo(a, b)
+    for node in params.requireds().iter() {
+        if let Some(p) = node.as_required_parameter_node() {
+            let loc = p.location();
+            result.push((p.name().as_slice().to_vec(), loc.start_offset() as u32, loc.end_offset() as u32));
+        }
+        // RequiredDestructuredParameterNode (def foo((a, b))) — too complex, skip
+    }
+
+    // Optional positional: def foo(a = 1)
+    for node in params.optionals().iter() {
+        if let Some(p) = node.as_optional_parameter_node() {
+            let loc = p.name_loc();
+            result.push((p.name().as_slice().to_vec(), loc.start_offset() as u32, loc.end_offset() as u32));
+        }
+    }
+
+    // Rest: def foo(*args)  — only if named
+    if let Some(rest) = params.rest() {
+        if let Some(p) = rest.as_rest_parameter_node() {
+            if let (Some(name), Some(loc)) = (p.name(), p.name_loc()) {
+                result.push((name.as_slice().to_vec(), loc.start_offset() as u32, loc.end_offset() as u32));
+            }
+        }
+    }
+
+    // Post-rest required: def foo(*args, b)
+    for node in params.posts().iter() {
+        if let Some(p) = node.as_required_parameter_node() {
+            let loc = p.location();
+            result.push((p.name().as_slice().to_vec(), loc.start_offset() as u32, loc.end_offset() as u32));
+        }
+    }
+
+    // Keyword required: def foo(name:)
+    for node in params.keywords().iter() {
+        if let Some(p) = node.as_required_keyword_parameter_node() {
+            let loc = p.name_loc();
+            result.push((p.name().as_slice().to_vec(), loc.start_offset() as u32, loc.end_offset() as u32));
+        } else if let Some(p) = node.as_optional_keyword_parameter_node() {
+            let loc = p.name_loc();
+            result.push((p.name().as_slice().to_vec(), loc.start_offset() as u32, loc.end_offset() as u32));
+        }
+    }
+
+    // Keyword rest: def foo(**opts)  — only if named
+    if let Some(kw_rest) = params.keyword_rest() {
+        if let Some(p) = kw_rest.as_keyword_rest_parameter_node() {
+            if let (Some(name), Some(loc)) = (p.name(), p.name_loc()) {
+                result.push((name.as_slice().to_vec(), loc.start_offset() as u32, loc.end_offset() as u32));
+            }
+        }
+        // NoKeywordsParameterNode (**nil) and ForwardingParameterNode (...) are
+        // silently skipped — no name to flag.
+    }
+
+    // Block: def foo(&block)  — only if named
+    if let Some(bp) = params.block() {
+        if let (Some(name), Some(loc)) = (bp.name(), bp.name_loc()) {
+            result.push((name.as_slice().to_vec(), loc.start_offset() as u32, loc.end_offset() as u32));
+        }
+    }
+
+    result
+}
+
+/// True if `name` appears as a word-boundary token anywhere in `source`.
+fn name_used_in_source(name: &[u8], source: &[u8]) -> bool {
+    let n = source.len();
+    let vn = name.len();
+    if vn == 0 || n < vn {
+        return false;
+    }
+    let mut pos = 0;
+    while pos + vn <= n {
+        if &source[pos..pos + vn] == name {
+            let before_ok = pos == 0 || {
+                let b = source[pos - 1];
+                !b.is_ascii_alphanumeric() && b != b'_'
+            };
+            let after_ok = pos + vn >= n || {
+                let b = source[pos + vn];
+                !b.is_ascii_alphanumeric() && b != b'_'
+            };
+            if before_ok && after_ok {
+                return true;
+            }
+        }
+        pos += 1;
+    }
+    false
+}
+
 impl Rule for UnusedMethodArgument {
     fn name(&self) -> &'static str {
         "Lint/UnusedMethodArgument"
     }
 
-    fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
+    fn node_kinds(&self) -> &'static [&'static str] {
+        &["DefNode"]
+    }
+
+    fn check_node(&self, ctx: &LintContext<'_>, node: &ruby_prism::Node<'_>) -> Vec<Diagnostic> {
+        let def_node = match node.as_def_node() {
+            Some(d) => d,
+            None => return vec![],
+        };
+
+        // Endless method: def foo(n) = n * 2  — has no separate body node
+        if def_node.equal_loc().is_some() {
+            return vec![];
+        }
+
+        // No body (pure forward-declaration stub / empty method)
+        let body = match def_node.body() {
+            Some(b) => b,
+            None => return vec![],
+        };
+
+        // No parameters at all
+        let params = match def_node.parameters() {
+            Some(p) => p,
+            None => return vec![],
+        };
+
+        // If any required param is a ForwardingParameterNode (...), skip entirely —
+        // all arguments are forwarded and nothing should be flagged.
+        let has_forwarding = params.requireds().iter()
+            .any(|n| n.as_forwarding_parameter_node().is_some());
+        if has_forwarding {
+            return vec![];
+        }
+
+        let param_list = collect_method_params(&params);
+        if param_list.is_empty() {
+            return vec![];
+        }
+
+        // Body source range
+        let body_loc = body.location();
+        let body_start = body_loc.start_offset();
+        let body_end = body_loc.end_offset();
+        let src = ctx.source.as_bytes();
+        if body_end > src.len() {
+            return vec![];
+        }
+        let body_src = &src[body_start..body_end];
+
         let mut diags = Vec::new();
-        let lines = &ctx.lines;
-        let n = lines.len();
-
-        let mut i = 0;
-        while i < n {
-            let line = &lines[i];
-            let trimmed = line.trim_start();
-
-            // Look for `def method_name(args)` pattern
-            if !trimmed.starts_with("def ") {
-                i += 1;
+        for (name_bytes, name_start, name_end) in &param_list {
+            // _-prefixed: intentionally unused
+            if name_bytes.first() == Some(&b'_') {
                 continue;
             }
-
-            // Parse the argument list
-            let def_line = trimmed;
-            let paren_open = match def_line.find('(') {
-                Some(p) => p,
-                None => { i += 1; continue; }
-            };
-            let paren_close = match def_line.rfind(')') {
-                Some(p) => p,
-                None => { i += 1; continue; }
-            };
-
-            if paren_close <= paren_open {
-                i += 1;
+            if name_bytes.is_empty() {
                 continue;
             }
-
-            let args_str = &def_line[paren_open+1..paren_close];
-            let args: Vec<&str> = args_str.split(',')
-                .map(|a| a.trim())
-                .filter(|a| !a.is_empty())
-                .collect();
-
-            // Find end of this def block
-            let def_start = i;
-            let mut depth = 1i32;
-            let mut j = i + 1;
-            while j < n && depth > 0 {
-                let t = lines[j].trim();
-                if t.starts_with("def ") || t.starts_with("if ") || t.starts_with("unless ")
-                    || t.starts_with("do ") || t == "do" || t.starts_with("begin")
-                    || t.starts_with("case ")
-                    || t.starts_with("while ") || t == "while"
-                    || t.starts_with("until ") || t == "until"
-                    || t.starts_with("for ")
-                    || t == "loop" || t.ends_with(" loop")
-                {
-                    depth += 1;
-                }
-                if t == "end" {
-                    depth -= 1;
-                }
-                j += 1;
+            if !name_used_in_source(name_bytes, body_src) {
+                let name_str = std::str::from_utf8(name_bytes).unwrap_or("?");
+                diags.push(Diagnostic {
+                    rule: self.name(),
+                    message: format!("Unused method argument `{}`.", name_str),
+                    range: TextRange::new(*name_start, *name_end),
+                    severity: Severity::Warning,
+                });
             }
-            let def_end = j;
-
-            // For each arg that doesn't start with `_`, check if it's used in the body
-            for arg in &args {
-                // Clean up arg (remove default values, splats, etc.)
-                let arg_clean = arg.trim_start_matches('*').trim_start_matches('&');
-                let arg_name_raw = arg_clean.split('=').next().unwrap_or("").trim();
-                // Handle keyword args: "bar: 'default'" -> "bar", "bar:" -> "bar"
-                let arg_name = if let Some(colon_pos) = arg_name_raw.find(':') {
-                    arg_name_raw[..colon_pos].trim()
-                } else {
-                    arg_name_raw
-                };
-
-                if arg_name.is_empty() || arg_name.starts_with('_') {
-                    continue;
-                }
-
-                // Check if arg_name appears in the method body
-                let mut used = false;
-                'body: for k in (def_start + 1)..def_end.min(n) {
-                    let body_line = &lines[k];
-                    let body_bytes = body_line.as_bytes();
-                    let body_len = body_bytes.len();
-                    let arg_bytes = arg_name.as_bytes();
-                    let arg_len = arg_bytes.len();
-
-                    let mut pos = 0;
-                    let mut in_single_string = false; // Only skip single-quoted (no interpolation)
-
-                    while pos < body_len {
-                        let b = body_bytes[pos];
-
-                        if in_single_string {
-                            if b == b'\\' { pos += 2; continue; }
-                            if b == b'\'' { in_single_string = false; }
-                            pos += 1;
-                            continue;
-                        }
-
-                        if b == b'\'' { in_single_string = true; pos += 1; continue; }
-
-                        if b == b'#' {
-                            // `#{` is string interpolation — not a comment, keep scanning
-                            let next = if pos + 1 < body_len { body_bytes[pos + 1] } else { 0 };
-                            if next != b'{' { break; } // actual comment — stop line
-                        }
-
-                        if pos + arg_len <= body_len && &body_bytes[pos..pos+arg_len] == arg_bytes {
-                            let before_ok = pos == 0 || !body_bytes[pos-1].is_ascii_alphanumeric() && body_bytes[pos-1] != b'_';
-                            let after_ok = pos + arg_len >= body_len
-                                || !body_bytes[pos+arg_len].is_ascii_alphanumeric() && body_bytes[pos+arg_len] != b'_';
-                            if before_ok && after_ok {
-                                used = true;
-                                break 'body;
-                            }
-                        }
-                        pos += 1;
-                    }
-                }
-
-                if !used {
-                    // Flag the argument on the def line
-                    let line_start = ctx.line_start_offsets[def_start] as usize;
-                    let indent = line.len() - trimmed.len();
-                    // Find the arg position in the original line
-                    let def_offset = indent + paren_open + 1;
-                    // Locate arg_name within the args_str
-                    let arg_offset_in_args = args_str.find(arg_name).unwrap_or(0);
-                    let pos = (line_start + def_offset + arg_offset_in_args) as u32;
-                    diags.push(Diagnostic {
-                        rule: self.name(),
-                        message: format!("Unused method argument `{}`.", arg_name),
-                        range: TextRange::new(pos, pos + arg_name.len() as u32),
-                        severity: Severity::Warning,
-                    });
-                }
-            }
-
-            i = def_end;
         }
 
         diags
