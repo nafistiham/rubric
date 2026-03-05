@@ -306,6 +306,46 @@ fn no_false_positive_for_multiple_do_block_end_comma() {
     assert!(diags.is_empty(), "multiple end, inside method args falsely flagged: {:?}", diags);
 }
 
+// ── False positive: `end:` (hash symbol key) must not be treated as `end` ─────
+#[test]
+fn no_false_positive_for_hash_end_symbol() {
+    // `end:` at the start of a trimmed line (multi-line hash) is a hash symbol
+    // key, not an `end` token. Must not pop the def frame.
+    let src = concat!(
+        "def foo\n",
+        "  opts = {\n",
+        "    end: 5,\n",
+        "    start: 1\n",
+        "  }\n",
+        "  opts\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "end: hash symbol falsely flagged: {:?}", diags);
+}
+
+// ── False positive: inline `if` after arithmetic/logical operator ──────────────
+#[test]
+fn no_false_positive_for_inline_if_after_operator() {
+    // `acc + if index.even?` opens a conditional block; its `end` must not pop
+    // the def frame prematurely.
+    let src = concat!(
+        "def sum_alternating(arr)\n",
+        "  arr.each_with_index.inject(0) do |acc, (val, index)|\n",
+        "    acc + if index.even?\n",
+        "             val\n",
+        "           else\n",
+        "             -val\n",
+        "           end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "inline if after + operator falsely flagged: {:?}", diags);
+}
+
 // ── Real misalignment must still be detected after `end,` patterns ────────────
 #[test]
 fn still_detects_misalignment_after_do_block_end_comma() {

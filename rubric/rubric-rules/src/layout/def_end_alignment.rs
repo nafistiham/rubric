@@ -140,6 +140,32 @@ impl Rule for DefEndAlignment {
                 || t.contains(" << if ") || t.ends_with(" << if")
                 || t.contains(" << unless ") || t.ends_with(" << unless")
                 || t.contains(" << case ") || t.ends_with(" << case")
+                // Arithmetic/logical operators followed by if/unless/case
+                // e.g. `acc + if index.even?`, `x | if cond`, `x || if cond`
+                || t.contains(" + if ") || t.ends_with(" + if")
+                || t.contains(" + unless ") || t.ends_with(" + unless")
+                || t.contains(" + case ") || t.ends_with(" + case")
+                || t.contains(" - if ") || t.ends_with(" - if")
+                || t.contains(" - unless ") || t.ends_with(" - unless")
+                || t.contains(" - case ") || t.ends_with(" - case")
+                || t.contains(" * if ") || t.ends_with(" * if")
+                || t.contains(" * unless ") || t.ends_with(" * unless")
+                || t.contains(" * case ") || t.ends_with(" * case")
+                || t.contains(" / if ") || t.ends_with(" / if")
+                || t.contains(" / unless ") || t.ends_with(" / unless")
+                || t.contains(" / case ") || t.ends_with(" / case")
+                || t.contains(" | if ") || t.ends_with(" | if")
+                || t.contains(" | unless ") || t.ends_with(" | unless")
+                || t.contains(" | case ") || t.ends_with(" | case")
+                || t.contains(" & if ") || t.ends_with(" & if")
+                || t.contains(" & unless ") || t.ends_with(" & unless")
+                || t.contains(" & case ") || t.ends_with(" & case")
+                || t.contains(" || if ") || t.ends_with(" || if")
+                || t.contains(" || unless ") || t.ends_with(" || unless")
+                || t.contains(" || case ") || t.ends_with(" || case")
+                || t.contains(" && if ") || t.ends_with(" && if")
+                || t.contains(" && unless ") || t.ends_with(" && unless")
+                || t.contains(" && case ") || t.ends_with(" && case")
                 // `var = begin` / `var ||= begin` / `x || begin` inline begin/rescue/end block
                 || t.ends_with("= begin") || t.ends_with("|| begin") || t.ends_with("&& begin")
                 || t.contains("= begin ")
@@ -159,7 +185,7 @@ impl Rule for DefEndAlignment {
             let is_end_token = t == "end"
                 || (t.starts_with("end") && {
                     match t.as_bytes().get(3).copied() {
-                        Some(c) => !c.is_ascii_alphanumeric() && c != b'_',
+                        Some(c) => !c.is_ascii_alphanumeric() && c != b'_' && c != b':',
                         None => false,
                     }
                 });
