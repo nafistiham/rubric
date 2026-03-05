@@ -143,7 +143,7 @@ impl Rule for SpaceAroundOperators {
 
                 // ── Skip percent literals: %r{}, %w[], %i[], %(str), %q(), %Q() ──
                 // Also handles backtick strings as a special case below.
-                if b == b'%' && j + 1 < len {
+                if b == b'%' && j + 1 < len && in_string.is_none() {
                     let next_b = bytes[j+1];
                     // Determine delimiter: skip optional type char (r, w, W, i, I, q, Q, x)
                     let (type_skip, delim_pos) = match next_b {
