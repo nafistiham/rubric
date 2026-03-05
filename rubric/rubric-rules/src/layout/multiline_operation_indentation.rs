@@ -26,16 +26,36 @@ fn ends_with_operator(line: &str) -> bool {
     false
 }
 
-/// Returns true when the line contains an even number of `/` characters (>= 2),
-/// which means the trailing `/` is the closing delimiter of a regex literal.
-///
-/// This heuristic is intentionally simple: we count all `/` chars in the
-/// trimmed line. Division expressions like `a / b` have one slash and never
-/// appear as a trailing operator (they don't end the line without a follow-on
-/// operand). Lines ending with `/` in practice are always closing a regex
-/// `/pattern/` which produces an even slash count.
+/// Count `/` characters that appear outside of string literals and comments.
+/// This avoids counting path separators inside strings (e.g. `"config/routes.rb"`).
+fn code_slash_count(line: &str) -> usize {
+    let mut count = 0;
+    let mut in_single = false;
+    let mut in_double = false;
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'\\' if in_single || in_double => { i += 2; continue; }
+            b'\'' if !in_double => { in_single = !in_single; }
+            b'"' if !in_single => { in_double = !in_double; }
+            b'#' if !in_single && !in_double => break,
+            b'/' if !in_single && !in_double => { count += 1; }
+            _ => {}
+        }
+        i += 1;
+    }
+    count
+}
+
+/// Returns true when the line contains an even number of code-level `/` characters
+/// (>= 2), which means the trailing `/` closes a regex literal rather than being
+/// a division operator.  Slashes inside string literals are excluded from the count
+/// so that `assert_file "path/to/file", /regex/` is correctly identified as
+/// ending with a regex (2 code slashes) rather than a division (3 total slashes).
 fn slash_count_is_even_and_paired(trimmed: &str) -> bool {
-    let count = trimmed.chars().filter(|&c| c == '/').count();
+    let count = code_slash_count(trimmed);
     count >= 2 && count % 2 == 0
 }
 
@@ -85,6 +105,11 @@ impl Rule for MultilineOperationIndentation {
         // so alignment-style continuation indentation is expected — not `current + 2`.
         let mut paren_depth: i32 = 0;
 
+        // Track the base indentation of the first line in a continuation chain.
+        // For a chain `A && \n B && \n C`, all continuation lines (B, C, …) must be
+        // at base+2 where base is A's indentation — not escalating by 2 each time.
+        let mut chain_base_indent: Option<usize> = None;
+
         let mut i = 0;
         while i < n {
             let line = &lines[i];
@@ -105,13 +130,19 @@ impl Rule for MultilineOperationIndentation {
 
                 // Skip blank lines
                 if next_trimmed.is_empty() {
+                    chain_base_indent = None;
                     paren_depth = (paren_depth + paren_depth_delta(line)).max(0);
                     i += 1;
                     continue;
                 }
 
+                // Establish chain base on the first line of the chain; subsequent
+                // lines in the same chain reuse the same base so indentation does
+                // not escalate for each additional `&&`/`||` operator.
+                let base_indent = *chain_base_indent.get_or_insert(current_indent);
+                let expected_indent = base_indent + 2;
+
                 let next_indent = next_line.len() - next_trimmed.len();
-                let expected_indent = current_indent + 2;
 
                 if next_indent != expected_indent {
                     let line_start = ctx.line_start_offsets[i + 1];
@@ -125,6 +156,9 @@ impl Rule for MultilineOperationIndentation {
                         severity: Severity::Warning,
                     });
                 }
+            } else {
+                // Line does not continue with an operator — chain is over.
+                chain_base_indent = None;
             }
 
             paren_depth = (paren_depth + paren_depth_delta(line)).max(0);
