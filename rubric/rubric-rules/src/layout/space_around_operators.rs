@@ -45,12 +45,56 @@ impl Rule for SpaceAroundOperators {
         // %i[...], %I[...] that spans multiple lines. Lines inside are plain word tokens —
         // no operator scanning applies.
         let mut in_percent_word_array = false;
+        // Cross-line multiline /regex/ tracking: true when a /regex/ started on a
+        // previous line and hasn't been closed yet.
+        let mut in_multiline_regex = false;
+        // Cross-line multiline %r{...} tracking: Some((close_byte, depth)) when a
+        // %r percent-regex literal spans multiple lines.
+        let mut in_multiline_percent_regex: Option<(u8, usize)> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             // Skip lines that are inside a heredoc body (including the terminator line).
             if let Some(ref term) = in_heredoc.clone() {
                 if line.trim() == term.as_str() {
                     in_heredoc = None;
+                }
+                continue;
+            }
+
+            // Skip lines inside a multiline /regex/.  Scan for the closing `/` so we
+            // know when the regex ends; don't flag operators inside the body.
+            if in_multiline_regex {
+                let bytes = line.as_bytes();
+                let mut k = 0;
+                while k < bytes.len() {
+                    match bytes[k] {
+                        b'\\' => { k += 2; }
+                        b'/' => { in_multiline_regex = false; k += 1; break; }
+                        _ => { k += 1; }
+                    }
+                }
+                continue;
+            }
+
+            // Skip lines inside a multiline %r{...} literal.
+            if let Some((close, ref mut depth)) = in_multiline_percent_regex {
+                let open = match close { b')' => b'(', b']' => b'[', b'}' => b'{', b'>' => b'<', c => c };
+                let bytes = line.as_bytes();
+                let mut k = 0;
+                while k < bytes.len() {
+                    match bytes[k] {
+                        b'\\' => { k += 2; }
+                        c if c == open => { *depth += 1; k += 1; }
+                        c if c == close => {
+                            *depth -= 1;
+                            k += 1;
+                            if *depth == 0 { break; }
+                        }
+                        _ => { k += 1; }
+                    }
+                }
+                if *depth == 0 {
+                    in_multiline_percent_regex = None;
                 }
                 continue;
             }
@@ -136,10 +180,15 @@ impl Rule for SpaceAroundOperators {
                                         _ => { j += 1; }
                                     }
                                 }
-                                // If we reached end of line without closing, this is a
-                                // multiline %w/%W/%i/%I word array — mark state and skip.
-                                if depth > 0 && matches!(next_b, b'w' | b'W' | b'i' | b'I') {
-                                    in_percent_word_array = true;
+                                // If we reached end of line without closing:
+                                // - %w/%W/%i/%I → word array (no operator scanning)
+                                // - %r → regex literal (no operator scanning)
+                                if depth > 0 {
+                                    if matches!(next_b, b'w' | b'W' | b'i' | b'I') {
+                                        in_percent_word_array = true;
+                                    } else if next_b == b'r' {
+                                        in_multiline_percent_regex = Some((close, depth));
+                                    }
                                     break;
                                 }
                             }
@@ -333,10 +382,11 @@ impl Rule for SpaceAroundOperators {
                         }
                     }
                     b'/' => {
-                        // `/` after an operator/open-paren/space is a regex start.
+                        // `/` after an operator/open-paren/space/unary-! is a regex start.
                         let prev = if j > 0 { bytes[j-1] } else { 0 };
                         if prev == b'=' || prev == b'(' || prev == b',' || prev == b'['
                             || prev == b' ' || prev == b'\t' || prev == 0
+                            || prev == b'!'  // !/regex/ is valid Ruby
                         {
                             in_regex = true;
                             j += 1;
@@ -422,6 +472,12 @@ impl Rule for SpaceAroundOperators {
                 }
 
                 j += 1;
+            }
+
+            // If we finished the line while still inside a /regex/ literal, the regex
+            // spans multiple lines — mark it so we skip the continuation lines.
+            if in_regex {
+                in_multiline_regex = true;
             }
         }
 

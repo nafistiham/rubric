@@ -370,6 +370,46 @@ fn no_false_positive_for_mod_assign() {
     assert!(diags.is_empty(), "%= falsely flagged: {:?}", diags);
 }
 
+// ── False positive: multiline /regex/x literal ───────────────────────────────
+#[test]
+fn no_false_positive_for_multiline_slash_regex() {
+    // /regex/ that spans multiple lines — operators inside body must not be flagged.
+    let src = concat!(
+        "EXPRESSION_REGEXP = /\n",
+        "  \\{\\{\n",
+        "    [a-z_]+\n",
+        "    (\\.([a-z_]+|[0-9]+))*\n",
+        "  \\}\\}\n",
+        "/iox\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "multiline /regex/ body falsely flagged: {:?}", diags);
+}
+
+// ── False positive: multiline %r{...} literal ────────────────────────────────
+#[test]
+fn no_false_positive_for_multiline_percent_r_regex() {
+    let src = concat!(
+        "PATTERN = %r{\n",
+        "  (/\\*\\s*<!\\[CDATA\\[\\s*\\*/) # Block comment style opening\n",
+        "  | (//\\s*<!\\[CDATA\\[)         # Single-line comment style\n",
+        "}x\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "multiline %r{{}} body falsely flagged: {:?}", diags);
+}
+
+// ── False positive: !/regex/ — negated regex match ───────────────────────────
+#[test]
+fn no_false_positive_for_negated_regex() {
+    let src = "return if !/image.*/.match?(content_type)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "!/regex/ falsely flagged: {:?}", diags);
+}
+
 // ── True positive: bare = without spaces is still flagged ────────────────────
 #[test]
 fn detects_bare_eq_without_spaces() {
