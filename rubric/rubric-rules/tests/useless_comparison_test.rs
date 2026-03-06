@@ -31,3 +31,13 @@ fn no_false_positive_for_receiver_dot_attr_vs_bare_local() {
     let diags = UselessComparison.check_source(&ctx);
     assert!(diags.is_empty(), "receiver.attr == bare_local falsely flagged: {:?}", diags);
 }
+
+// `class Admin::AccountStatusesFilter < AccountStatusesFilter` — `<` is class
+// inheritance, not a comparison; the namespace-qualified LHS must not be flagged.
+#[test]
+fn no_false_positive_for_class_inheritance() {
+    let src = "class Admin::AccountStatusesFilter < AccountStatusesFilter\n  def foo\n    1\n  end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = UselessComparison.check_source(&ctx);
+    assert!(diags.is_empty(), "class inheritance `<` falsely flagged: {:?}", diags);
+}

@@ -18,6 +18,23 @@ fn opens_non_def_block(t: &str) -> bool {
         || t.starts_with("module ")
 }
 
+/// Returns true if `t` is an inline conditional assignment, e.g.:
+///   `result = if cond`, `a, b = unless cond`, `x = case val`, `x = begin`
+/// These open a block that needs a matching `end` but are not detected by
+/// `opens_non_def_block` because the keyword is not at the start of the line.
+fn has_inline_conditional(t: &str) -> bool {
+    !t.starts_with("def ")
+        && !opens_non_def_block(t)
+        && (t.contains("= if ")
+            || t.ends_with("= if")
+            || t.contains("= unless ")
+            || t.ends_with("= unless")
+            || t.contains("= case ")
+            || t.ends_with("= case")
+            || t.ends_with("= begin")
+            || t.contains("= begin "))
+}
+
 impl Rule for TopLevelReturnWithArgument {
     fn name(&self) -> &'static str {
         "Lint/TopLevelReturnWithArgument"
@@ -43,6 +60,9 @@ impl Rule for TopLevelReturnWithArgument {
             if t.starts_with("def ") { def_depth += 1; }
             // Track other block openers (only when not already a def line)
             else if opens_non_def_block(t) { block_depth += 1; }
+            // Inline conditional assignment: `x = if cond`, `a, b = unless cond`, etc.
+            // The closing `end` must decrement block_depth, not def_depth.
+            else if has_inline_conditional(t) { block_depth += 1; }
 
             // `end` closes the innermost open block — prefer non-def blocks first
             if t == "end" || t.starts_with("end ") || t.starts_with("end.") {

@@ -50,10 +50,15 @@ impl Rule for UselessComparison {
                     }
                     let rhs = &after[..rhs_end];
 
-                    // Skip if LHS has a receiver (char before lhs_start is `.`)
-                    // e.g. `thread.account_id` — `account_id` alone is not the full LHS
+                    // Skip if LHS has a receiver (char before lhs_start is `.`, `:`, or `@`)
+                    // e.g. `thread.account_id`   — `.` method call receiver
+                    // e.g. `Admin::AccountStatusesFilter` — `::` namespace separator
+                    // e.g. `@account_id`          — `@` instance variable prefix
                     let lhs_has_receiver = lhs_start > 0
-                        && before_bytes.get(lhs_start.wrapping_sub(1)) == Some(&b'.');
+                        && matches!(
+                            before_bytes.get(lhs_start.wrapping_sub(1)).copied(),
+                            Some(b'.') | Some(b':') | Some(b'@')
+                        );
 
                     if !rhs.is_empty() && lhs == rhs && !lhs_has_receiver {
                         let line_start = ctx.line_start_offsets[i] as usize;
