@@ -89,6 +89,42 @@ fn no_false_positive_for_assert_with_comparison_and_comma() {
     );
 }
 
+// Branch return value: expression inside if/case branch whose next line is
+// `else`, `elsif`, or `when` is the implicit return of that branch — not void.
+#[test]
+fn no_false_positive_for_branch_return_before_else() {
+    let src = concat!(
+        "def ratio(a, b)\n",
+        "  if a > b\n",
+        "    a - b\n",
+        "  else\n",
+        "    b - a\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = Void.check_source(&ctx);
+    assert!(diags.is_empty(), "branch return before `else` falsely flagged: {:?}", diags);
+}
+
+#[test]
+fn no_false_positive_for_branch_return_before_elsif() {
+    let src = concat!(
+        "def typecast(key, value)\n",
+        "  if key == :bool\n",
+        "    value == '1'\n",
+        "  elsif key == :int\n",
+        "    value.to_i\n",
+        "  else\n",
+        "    value\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = Void.check_source(&ctx);
+    assert!(diags.is_empty(), "branch return before `elsif` falsely flagged: {:?}", diags);
+}
+
 // `end % n % m` — chained on block result, not standalone void expression
 #[test]
 fn no_false_positive_for_end_chained_expression() {

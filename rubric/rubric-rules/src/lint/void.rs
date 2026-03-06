@@ -35,11 +35,15 @@ impl Rule for Void {
                 continue;
             }
 
-            // Skip if the next non-empty, non-comment line is `end` — implicit return value
+            // Skip if the next non-empty, non-comment line is a branch boundary or `end`
+            // — the expression is the implicit return value of that branch.
             let next_code = ctx.lines[i+1..].iter()
                 .map(|l| l.trim())
                 .find(|l| !l.is_empty() && !l.starts_with('#'));
-            if next_code.map(|l| l == "end" || l.starts_with("end ") || l.starts_with("end.")).unwrap_or(false) {
+            if next_code.map(|l| {
+                l == "end" || l.starts_with("end ") || l.starts_with("end.")
+                    || l == "else" || l.starts_with("elsif ") || l.starts_with("when ")
+            }).unwrap_or(false) {
                 continue;
             }
 
