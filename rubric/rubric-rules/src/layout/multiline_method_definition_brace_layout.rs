@@ -31,9 +31,19 @@ impl Rule for MultilineMethodDefinitionBraceLayout {
                         let closes = prev.chars().filter(|&c| c == ')').count();
                         if opens == closes {
                             // Single-line def — not a multiline definition
-                            break; // Don't set is_multiline_def = true
+                            break;
                         }
-                        is_multiline_def = true;
+                        // Symmetrical style (RuboCop default): only flag when the first
+                        // parameter is on a NEW line (nothing after `(` on the def line).
+                        // If the first param is on the def line, the closing `)` may also
+                        // be on the last param line — that is symmetric and correct.
+                        let paren_pos = prev.find('(').unwrap_or(prev.len() - 1);
+                        let after_paren = prev[paren_pos + 1..].trim();
+                        if after_paren.is_empty() {
+                            // First param on new line → `)` on content line = asymmetric → flag
+                            is_multiline_def = true;
+                        }
+                        // else: first param on def line → symmetric → don't flag
                         break;
                     }
                     if prev.is_empty() { break; }

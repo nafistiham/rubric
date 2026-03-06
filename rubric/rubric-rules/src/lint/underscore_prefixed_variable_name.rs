@@ -44,12 +44,28 @@ impl Rule for UnderscorePrefixedVariableName {
                     let before_ok = pos == 0 || !bb[pos - 1].is_ascii_alphanumeric() && bb[pos - 1] != b'_';
                     let after_ok = pos + vn >= src_len || !bb[pos + vn].is_ascii_alphanumeric() && bb[pos + vn] != b'_';
                     if before_ok && after_ok {
-                        // Check if this is NOT the assignment itself
-                        // Find which line this position is on
+                        // Find which line this occurrence is on.
                         let line_of_occurrence = ctx.line_start_offsets.partition_point(|&o| o as usize <= pos).saturating_sub(1);
                         if line_of_occurrence != *assign_line {
-                            used = true;
-                            break;
+                            // Skip occurrences that are themselves LHS assignments
+                            // of the same variable (e.g. `_tag = ...` in another block).
+                            // Only count as a use when the occurrence is a read.
+                            let is_lhs_assignment = {
+                                let line_start = ctx.line_start_offsets[line_of_occurrence] as usize;
+                                let pos_in_line = pos - line_start;
+                                let line_bytes = lines[line_of_occurrence].as_bytes();
+                                let after_var = &line_bytes[pos_in_line + vn..];
+                                let mut k = 0;
+                                while k < after_var.len() && after_var[k] == b' ' { k += 1; }
+                                k < after_var.len()
+                                    && after_var[k] == b'='
+                                    && (k + 1 >= after_var.len()
+                                        || (after_var[k + 1] != b'=' && after_var[k + 1] != b'>'))
+                            };
+                            if !is_lhs_assignment {
+                                used = true;
+                                break;
+                            }
                         }
                     }
                 }
