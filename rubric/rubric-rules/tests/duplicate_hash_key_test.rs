@@ -57,3 +57,31 @@ fn detects_duplicate_symbol_key() {
     let diags = run(src);
     assert!(!diags.is_empty(), "duplicate symbol key should be detected");
 }
+
+// ── Bug 3: CSS properties inside heredoc values must not fire ─────────────────
+// Heredoc bodies like `<<~CSS` contain CSS such as `padding: 0;` which look
+// like Ruby symbol keys to the raw-byte scanner. When two heredoc values share
+// the same CSS property name, it was falsely flagged as a duplicate hash key.
+#[test]
+fn no_false_positive_for_css_in_heredoc_values() {
+    let src = r#"INLINE_STYLES = {
+  blockquote: <<~CSS,
+    background: #FCF8FF;
+    padding: 0;
+  CSS
+  status_link: <<~CSS,
+    padding: 24px;
+    color: #1C1A25;
+  CSS
+  div_account: <<~CSS,
+    color: #787588;
+  CSS
+}
+"#;
+    let diags = run(src);
+    assert!(
+        diags.is_empty(),
+        "CSS properties inside heredoc values falsely flagged as duplicate hash keys: {:?}",
+        diags
+    );
+}

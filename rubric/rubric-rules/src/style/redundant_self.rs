@@ -73,11 +73,18 @@ impl Rule for RedundantSelf {
                             {
                                 k += 1;
                             }
-                            // Skip if it's assignment (`self.foo =`)
-                            let is_assignment = k < len
-                                && bytes[k] == b' '
-                                && k + 1 < len
-                                && bytes[k + 1] == b'=';
+                            // Skip if it's assignment (`self.foo =` or `self.foo  =`).
+                            // Skip all spaces after the method name then check for `=`
+                            // but not `==` (comparison).
+                            let is_assignment = {
+                                let mut tmp = k;
+                                while tmp < len && bytes[tmp] == b' ' {
+                                    tmp += 1;
+                                }
+                                tmp < len
+                                    && bytes[tmp] == b'='
+                                    && (tmp + 1 >= len || bytes[tmp + 1] != b'=')
+                            };
                             // Skip `self.class` and other special cases
                             let method_name = &line[j + pat_len..k];
                             let is_special = method_name == "class"

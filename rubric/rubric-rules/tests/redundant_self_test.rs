@@ -48,6 +48,19 @@ fn no_false_positive_self_call_inside_class_method_body() {
     );
 }
 
+// `self.foo  = bar` (multiple spaces before `=`) must NOT be flagged as redundant.
+#[test]
+fn no_false_positive_for_setter_with_extra_spaces() {
+    let source = "def generate_keypair\n  keypair = OpenSSL::PKey::RSA.new(2048)\n  self.private_key = keypair.to_pem\n  self.public_key  = keypair.public_key.to_pem\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), source);
+    let diags = RedundantSelf.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "`self.public_key  = ...` with extra space must not be flagged, got: {:?}",
+        diags
+    );
+}
+
 // Plain instance methods still generate a violation when `self.method` is used redundantly.
 #[test]
 fn still_detects_redundant_self_in_instance_method() {

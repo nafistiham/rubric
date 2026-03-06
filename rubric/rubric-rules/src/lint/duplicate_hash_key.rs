@@ -62,6 +62,40 @@ fn scan_hash_for_duplicates(
             continue;
         }
 
+        // 5a. Skip heredoc openers `<<WORD`, `<<-WORD`, `<<~WORD`.
+        // The heredoc body is string content and must NOT be scanned for hash keys.
+        if b == b'<' && i + 1 < n && hash_bytes[i + 1] == b'<' {
+            let mut j = i + 2;
+            // Optional indent/squiggly modifier
+            if j < n && (hash_bytes[j] == b'-' || hash_bytes[j] == b'~') { j += 1; }
+            // Optional quote around terminator word (e.g. <<~'SQL')
+            if j < n && matches!(hash_bytes[j], b'\'' | b'"' | b'`') { j += 1; }
+            let term_start = j;
+            while j < n && (hash_bytes[j].is_ascii_alphanumeric() || hash_bytes[j] == b'_') { j += 1; }
+            let term = hash_bytes[term_start..j].to_vec();
+            if !term.is_empty() {
+                // Skip to end of the opener line (so the rest of that line is ignored)
+                while i < n && hash_bytes[i] != b'\n' { i += 1; }
+                if i < n { i += 1; } // consume the newline
+                // Skip heredoc body lines until the terminator line
+                loop {
+                    let line_start = i;
+                    while i < n && hash_bytes[i] != b'\n' { i += 1; }
+                    let line = &hash_bytes[line_start..i];
+                    // Trim leading whitespace to get the bare line
+                    let mut k = 0;
+                    while k < line.len() && (line[k] == b' ' || line[k] == b'\t') { k += 1; }
+                    let bare = &line[k..];
+                    // Check if bare line is exactly the terminator (ignoring method chaining like `.squish`)
+                    let matches_term = bare.starts_with(&term)
+                        && bare.get(term.len()).map_or(true, |&c| !c.is_ascii_alphanumeric() && c != b'_');
+                    if i < n { i += 1; } // consume newline (or advance past EOF)
+                    if matches_term || i >= n { break; }
+                }
+                continue;
+            }
+        }
+
         // 5. Pattern 1: `word:` new-style symbol key (e.g. `name: value`).
         if b.is_ascii_alphabetic() || b == b'_' {
             let ki = i;
