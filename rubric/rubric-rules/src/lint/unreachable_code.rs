@@ -30,7 +30,7 @@ impl Rule for UnreachableCode {
             let is_terminator = TERMINATORS.iter().any(|kw| {
                 trimmed.starts_with(kw) && (
                     trimmed.len() == kw.len()
-                    || !trimmed.as_bytes().get(kw.len()).map(|b| b.is_ascii_alphanumeric() || *b == b'_').unwrap_or(false)
+                    || !trimmed.as_bytes().get(kw.len()).map(|b| b.is_ascii_alphanumeric() || *b == b'_' || *b == b':').unwrap_or(false)
                 )
             });
 

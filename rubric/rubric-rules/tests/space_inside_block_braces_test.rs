@@ -167,3 +167,32 @@ fn no_false_positive_for_multiline_block_with_args() {
         diags
     );
 }
+
+// ── False positive: {|params|} block braces — `|` immediately after `{` ─────
+// RuboCop does NOT flag `find{|i| i.name == x}` because `|` is the block
+// parameter delimiter. Must not fire.
+#[test]
+fn no_false_positive_for_block_braces_with_pipe_params() {
+    let src = "def foo\n  items.find{|i| i.name == \"x\"}\n  items.select{|x| x > 0}\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideBlockBraces.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "block braces with pipe params falsely flagged: {:?}",
+        diags
+    );
+}
+
+// ── False positive: braces inside multiline regex body ───────────────────────
+// Lines inside a multiline /regex/ must not be scanned for block braces.
+#[test]
+fn no_false_positive_for_braces_in_multiline_regex() {
+    let src = "PATTERN = /\n  (?:abc|def)\n  \\{\\{\n/iox\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideBlockBraces.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "braces inside multiline regex body falsely flagged: {:?}",
+        diags
+    );
+}

@@ -37,3 +37,11 @@ fn no_violation_for_guard_return_if() {
     let diags = UnreachableCode.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations for guard return if, got: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_hash_next_key() {
+    let src = "def foo\n  opts = {\n    next: next_page,\n    break: stop_point\n  }\n  opts\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = UnreachableCode.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for hash with next:/break: keys, got: {:?}", diags);
+}

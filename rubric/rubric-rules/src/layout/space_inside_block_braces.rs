@@ -2,6 +2,19 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct SpaceInsideBlockBraces;
 
+// Describes what kind of brace `{` opened.
+#[derive(Clone, Copy)]
+enum BraceKind {
+    Hash,
+    // Block opened with a space or other non-pipe content after `{`.
+    Block,
+    // Block opened in "tight" style: `{` directly follows a word character (no
+    // preceding space) AND is immediately followed by `|` (the block-param
+    // delimiter). In this style RuboCop does not require interior spaces, so
+    // both the open and close brace checks are suppressed.
+    TightPipeBlock,
+}
+
 impl Rule for SpaceInsideBlockBraces {
     fn name(&self) -> &'static str {
         "Layout/SpaceInsideBlockBraces"
@@ -9,8 +22,28 @@ impl Rule for SpaceInsideBlockBraces {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        let mut in_multiline_regex = false;
 
         for (i, line) in ctx.lines.iter().enumerate() {
+            // Skip multiline regex body lines.
+            if in_multiline_regex {
+                let bytes = line.as_bytes();
+                let n = bytes.len();
+                let mut k = 0;
+                let mut closed = false;
+                while k < n {
+                    match bytes[k] {
+                        b'\\' => { k += 2; }
+                        b'/' => { closed = true; k += 1; break; }
+                        _ => { k += 1; }
+                    }
+                }
+                if closed {
+                    in_multiline_regex = false;
+                }
+                continue;
+            }
+
             let trimmed = line.trim_start();
             if trimmed.starts_with('#') {
                 continue;
@@ -22,9 +55,9 @@ impl Rule for SpaceInsideBlockBraces {
 
             let mut pos = 0;
             let mut in_string: Option<u8> = None;
-            // Stack recording whether each open `{` is a block (true) or hash (false).
+            // Stack recording what kind of brace each `{` opened.
             // Used to give the `}` check the same context as the `{` check.
-            let mut brace_kind_stack: Vec<bool> = Vec::new();
+            let mut brace_kind_stack: Vec<BraceKind> = Vec::new();
 
             while pos < n {
                 let b = bytes[pos];
@@ -83,19 +116,23 @@ impl Rule for SpaceInsideBlockBraces {
                     }
                 }
 
-                // Skip /regex/ literals
+                // Skip /regex/ literals; detect unclosed regex that spans to the next line.
                 if b == b'/' {
                     let prev = if pos > 0 { bytes[pos - 1] } else { 0 };
                     if prev == b'=' || prev == b'(' || prev == b','
                         || prev == b'[' || prev == b' ' || prev == b'\t' || prev == 0
                     {
                         pos += 1;
+                        let mut closed = false;
                         while pos < n {
                             match bytes[pos] {
                                 b'\\' => { pos += 2; }
-                                b'/' => { pos += 1; break; }
+                                b'/' => { closed = true; pos += 1; break; }
                                 _ => { pos += 1; }
                             }
+                        }
+                        if !closed {
+                            in_multiline_regex = true;
                         }
                         continue;
                     }
@@ -119,6 +156,9 @@ impl Rule for SpaceInsideBlockBraces {
                         }
                         found
                     };
+
+                    // The character immediately before `{` (no whitespace skipping).
+                    let prev_immediate = if pos > 0 { bytes[pos - 1] } else { 0 };
 
                     // Check if the preceding token is the keyword `in` (pattern matching).
                     // Scan backwards past whitespace; if the preceding word is `in`, treat as hash.
@@ -145,9 +185,31 @@ impl Rule for SpaceInsideBlockBraces {
                         )
                         || pos == line.len() - line.trim_start().len();
 
-                    brace_kind_stack.push(!is_hash); // true = block
+                    // Detect "tight pipe-params" style: `find{|i| ...}`.
+                    // Conditions: it is a block (not a hash), `{` is immediately
+                    // followed by `|`, AND there is no space immediately before `{`
+                    // (prev_immediate is a word char, `)`, or `]`). In this style
+                    // the writer has opted out of interior spaces, so we suppress
+                    // both the open-brace and close-brace checks.
+                    let is_tight_pipe = !is_hash
+                        && next == b'|'
+                        && (prev_immediate.is_ascii_alphanumeric()
+                            || prev_immediate == b'_'
+                            || prev_immediate == b')'
+                            || prev_immediate == b']');
 
-                    if !is_hash && next != b' ' && next != b'\n' && next != b'}' && next != 0 {
+                    let kind = if is_hash {
+                        BraceKind::Hash
+                    } else if is_tight_pipe {
+                        BraceKind::TightPipeBlock
+                    } else {
+                        BraceKind::Block
+                    };
+                    brace_kind_stack.push(kind);
+
+                    if matches!(kind, BraceKind::Block)
+                        && next != b' ' && next != b'\n' && next != b'}' && next != 0
+                    {
                         let flag_pos = (line_start + pos) as u32;
                         diags.push(Diagnostic {
                             rule: self.name(),
@@ -159,9 +221,10 @@ impl Rule for SpaceInsideBlockBraces {
                 }
 
                 if b == b'}' {
-                    // Only fire if this `}` closes a block brace (not a hash).
-                    let is_block = brace_kind_stack.pop().unwrap_or(false);
-                    if is_block && pos > 0 {
+                    // Only fire if this `}` closes a plain block brace (not a hash or
+                    // a tight-pipe-params block).
+                    let kind = brace_kind_stack.pop().unwrap_or(BraceKind::Hash);
+                    if matches!(kind, BraceKind::Block) && pos > 0 {
                         let prev = bytes[pos - 1];
                         if prev != b' ' && prev != b'\n' && prev != b'{' {
                             let flag_pos = (line_start + pos) as u32;
