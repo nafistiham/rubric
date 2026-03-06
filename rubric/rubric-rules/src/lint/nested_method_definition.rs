@@ -2,6 +2,16 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct NestedMethodDefinition;
 
+/// Tracks what kind of block is currently open.
+#[derive(Debug, PartialEq)]
+enum FrameKind {
+    /// An opened `def ... end` block.
+    Def,
+    /// Any other block: do-block, class, module, if, unless, while, until,
+    /// for, case, begin, etc.
+    Other,
+}
+
 /// Returns `true` when the trimmed line is an endless method definition,
 /// i.e. `def name = expr` or `def name(params) = expr`.
 ///
@@ -42,13 +52,55 @@ fn is_endless_method(t: &str) -> bool {
 /// Returns `true` when the trimmed line is a single-line method definition that
 /// opens and closes on the same line, e.g. `def setup; body; end`.
 ///
-/// These one-liners never increment def_depth because their `end` token is on
+/// These one-liners never push to the stack because their `end` token is on
 /// the same line as the `def` — the line-by-line scanner would otherwise miss
-/// the closing `end` and leave depth permanently elevated.
+/// the closing `end` and leave a frame permanently on the stack.
 fn is_one_liner_def(t: &str) -> bool {
     // Must contain "; end" somewhere after the def signature.
     // Also accept the rare "; end " (end followed by a comment marker).
     t.contains("; end") || t.contains(";end")
+}
+
+/// Returns `true` when the trimmed line opens a non-def block that requires a
+/// matching `end`: do-blocks, class, module, if, unless, while, until, for,
+/// case, begin.
+///
+/// Single-line class/module (`class Foo; end`) are excluded because their
+/// closing `end` appears on the same line.
+fn opens_other_block(t: &str) -> bool {
+    // do-block: ends with ` do`, contains ` do |`, ` do|`, or is exactly `do`
+    if t == "do"
+        || t.ends_with(" do")
+        || t.contains(" do |")
+        || t.contains(" do|")
+    {
+        return true;
+    }
+
+    // Keyword-based openers
+    let keyword_match = t.starts_with("if ")
+        || t.starts_with("unless ")
+        || t.starts_with("while ")
+        || t.starts_with("until ")
+        || t.starts_with("for ")
+        || t.starts_with("case ")
+        || t == "begin"
+        || t.starts_with("begin ");
+
+    if keyword_match {
+        return true;
+    }
+
+    // class / module — but NOT one-liners like `class Foo; end`
+    if t.starts_with("class ") || t.starts_with("module ") {
+        // One-liner: contains `; end` (with or without trailing content)
+        if t.contains("; end") || t.contains(";end") {
+            return false;
+        }
+        return true;
+    }
+
+    false
 }
 
 /// Extract the heredoc terminator word from a line that opens a heredoc.
@@ -100,7 +152,10 @@ impl Rule for NestedMethodDefinition {
         let mut diags = Vec::new();
         let lines = &ctx.lines;
         let n = lines.len();
-        let mut def_depth = 0usize;
+        // Frame stack: each opened block (def or other) pushes a frame.
+        // A `def` is only flagged as nested when the TOP frame is `Def`
+        // (i.e. directly inside another def, not inside an intervening block).
+        let mut stack: Vec<FrameKind> = Vec::new();
         // When `Some(word)`, we are inside a heredoc whose terminator is `word`.
         let mut heredoc_terminator_word: Option<String> = None;
 
@@ -135,19 +190,20 @@ impl Rule for NestedMethodDefinition {
             if t.starts_with("def ") || t == "def" {
                 if is_endless_method(t) {
                     // Endless methods (`def foo = expr`) have no `end` token;
-                    // do not push depth.
+                    // do not push a frame.
                     continue;
                 }
 
                 // Single-line `def method; body; end` — the `end` is on the same
                 // line as the `def`. The line-by-line scan would never see the
-                // closing `end`, leaving depth permanently elevated. Skip depth
-                // changes entirely for these one-liners.
+                // closing `end`, leaving a frame permanently on the stack. Skip
+                // frame changes entirely for these one-liners.
                 if is_one_liner_def(t) {
                     continue;
                 }
 
-                if def_depth > 0 {
+                // Flag only when directly inside another def (top frame is Def).
+                if stack.last() == Some(&FrameKind::Def) {
                     // Nested def — flag it (unless it's a singleton method def `def obj.method`)
                     // Skip singleton method definitions like `def self.foo` or `def obj.foo`
                     let after_def = t.strip_prefix("def ").unwrap_or("");
@@ -165,9 +221,19 @@ impl Rule for NestedMethodDefinition {
                         });
                     }
                 }
-                def_depth += 1;
-            } else if t == "end" && def_depth > 0 {
-                def_depth -= 1;
+                stack.push(FrameKind::Def);
+            } else if t == "end"
+                || (t.starts_with("end") && matches!(
+                    t.as_bytes().get(3).copied(),
+                    Some(c) if !c.is_ascii_alphanumeric() && c != b'_' && c != b':'
+                ))
+            {
+                // Pop the top frame (if any). Do not push anything.
+                // The word-boundary check (not alphanumeric, not _, not :) prevents
+                // `endless` / `end:` from being treated as `end` tokens.
+                stack.pop();
+            } else if opens_other_block(t) {
+                stack.push(FrameKind::Other);
             }
         }
 

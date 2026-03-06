@@ -131,6 +131,51 @@ fn no_false_positive_for_single_line_def_with_semicolon_end() {
     );
 }
 
+// Block false-positive tests (Module.new do / Class.new do)
+
+#[test]
+fn no_false_positive_for_def_inside_module_new_do() {
+    // A `def` inside `Module.new do ... end` is NOT nested inside another def.
+    // The outer def returns the module; the inner defs are module instance methods.
+    let src = concat!(
+        "def controller_helpers\n",
+        "  Module.new do\n",
+        "    def current_account\n",
+        "      @account ||= Account.first\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NestedMethodDefinition.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "def inside Module.new do should not be flagged; got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_false_positive_for_def_inside_class_new_do() {
+    // A `def` inside `Class.new described_class do ... end` is NOT a nested def.
+    let src = concat!(
+        "def fake_source_class\n",
+        "  Class.new described_class do\n",
+        "    def get(account, limit: 10)\n",
+        "      base_account_scope(account).limit(limit)\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NestedMethodDefinition.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "def inside Class.new do should not be flagged; got: {:?}",
+        diags
+    );
+}
+
 // Heredoc false-positive tests
 
 #[test]
