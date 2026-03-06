@@ -83,11 +83,16 @@ impl Rule for DefEndAlignment {
         // is_def=true = def/class/module (alignment checked), is_def=false = inner construct
         let mut stack: Vec<(usize, usize, bool)> = Vec::new();
         let mut in_heredoc: Option<String> = None;
+        // Track backslash line continuations — continuation lines must not be
+        // treated as inner-construct openers (e.g. `raise x \` / `  unless cond`).
+        let mut prev_continued = false;
 
         for i in 0..n {
             let line = &lines[i];
             let trimmed = line.trim_start();
             let indent = line.len() - trimmed.len();
+            let is_continuation = prev_continued;
+            prev_continued = line.trim_end().ends_with('\\');
 
             // Skip heredoc body lines — def/end keywords inside heredocs are string content.
             if let Some(ref term) = in_heredoc.clone() {
@@ -116,7 +121,7 @@ impl Rule for DefEndAlignment {
                 || t.starts_with("class ") || t.starts_with("module ")
             );
 
-            let is_inner_construct = !is_def_opener && !is_one_liner(t) && (
+            let is_inner_construct = !is_continuation && !is_def_opener && !is_one_liner(t) && (
                 t.starts_with("if ")
                 || t.starts_with("unless ")
                 || t.starts_with("while ")

@@ -346,6 +346,37 @@ fn no_false_positive_for_inline_if_after_operator() {
     assert!(diags.is_empty(), "inline if after + operator falsely flagged: {:?}", diags);
 }
 
+// ── False positive: backslash continuation line starting with `unless` ─────────
+// e.g. `raise Err, 'msg' \` / `  unless condition` — the `unless` is a
+// modifier on the continuation, not a new block opener.
+#[test]
+fn no_false_positive_for_unless_on_continuation_line() {
+    let src = concat!(
+        "module Faker\n",
+        "  class Creature\n",
+        "    class Bird < Base\n",
+        "      class << self\n",
+        "        def common_name(tax_order = nil)\n",
+        "          if tax_order.nil?\n",
+        "            sample\n",
+        "          else\n",
+        "            raise TypeError, 'must be symbolizable' \\\n",
+        "              unless tax_order.respond_to?(:to_sym)\n",  // continuation — not a block opener
+        "            raise ArgumentError, 'invalid order' \\\n",
+        "                                 unless valid?(tax_order)\n",  // same
+        "            the_order\n",
+        "          end\n",
+        "        end\n",
+        "      end\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(diags.is_empty(), "backslash-continuation unless falsely flagged: {:?}", diags);
+}
+
 // ── Real misalignment must still be detected after `end,` patterns ────────────
 #[test]
 fn still_detects_misalignment_after_do_block_end_comma() {
