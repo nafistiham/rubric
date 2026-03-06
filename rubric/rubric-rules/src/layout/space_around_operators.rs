@@ -122,6 +122,12 @@ impl Rule for SpaceAroundOperators {
             // Track if this line is a def header so we can skip = in param defaults
             let is_def_line = trimmed_line.starts_with("def ");
             let mut paren_depth: i32 = 0;
+            // Interpolation tracking for "...#{code}..." strings.
+            // When > 0, we are inside a #{...} within a double-quoted string.
+            let mut in_interp_depth: usize = 0;
+            // Nested string delimiter inside an interpolation (e.g. "attr-#{x}" where
+            // the inner `"` starts a new string within the #{...} block).
+            let mut in_nested_string: Option<u8> = None;
 
             // If we are inside a multiline %w/%W/%i/%I array, scan for the closing `]`
             // to end the context, then skip operator checking for this line.
@@ -208,9 +214,45 @@ impl Rule for SpaceAroundOperators {
                     continue;
                 }
 
+                // ── Interpolation state (inside #{...} of a "..." string) ──
+                // When in_interp_depth > 0, we are inside a #{...} block.
+                // Skip all content here; `"` inside must NOT close the outer string.
+                if in_interp_depth > 0 {
+                    // Handle nested string literals within the interpolation
+                    if let Some(delim) = in_nested_string {
+                        match b {
+                            b'\\' => { j += 2; continue; }
+                            c if c == delim => { in_nested_string = None; j += 1; continue; }
+                            _ => { j += 1; continue; }
+                        }
+                    }
+                    match b {
+                        b'{' => { in_interp_depth += 1; }
+                        b'}' => { in_interp_depth -= 1; }
+                        b'"' | b'\'' | b'`' => { in_nested_string = Some(b); }
+                        b'#' if j + 1 < len && bytes[j + 1] == b'{' => {
+                            // Nested interpolation (#{...} inside #{...})
+                            in_interp_depth += 1;
+                            j += 2;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                    continue;
+                }
+
                 // ── String state ─────────────────────────────────────────────
                 match in_string {
                     Some(_) if b == b'\\' => { j += 2; continue; }
+                    // Detect #{...} interpolation inside double-quoted and backtick strings
+                    Some(q) if (q == b'"' || q == b'`') && b == b'#'
+                        && j + 1 < len && bytes[j + 1] == b'{' =>
+                    {
+                        in_interp_depth = 1;
+                        j += 2;
+                        continue;
+                    }
                     Some(delim) if b == delim => { in_string = None; j += 1; continue; }
                     Some(_) => { j += 1; continue; }
                     None if b == b'"' || b == b'\'' || b == b'`' => { in_string = Some(b); j += 1; continue; }

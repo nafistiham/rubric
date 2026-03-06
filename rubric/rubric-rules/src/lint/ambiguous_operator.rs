@@ -70,9 +70,21 @@ impl Rule for AmbiguousOperator {
 
             let len = bytes.len();
             let mut j = 0;
+            let mut in_string: Option<u8> = None;
 
             while j < len {
                 let b = bytes[j];
+
+                // ── String state: skip operators inside string literals ─────
+                match in_string {
+                    Some(_) if b == b'\\' => { j += 2; continue; }
+                    Some(delim) if b == delim => { in_string = None; j += 1; continue; }
+                    Some(_) => { j += 1; continue; }
+                    None if b == b'"' || b == b'\'' || b == b'`' => { in_string = Some(b); j += 1; continue; }
+                    None if b == b'#' => break, // inline comment
+                    None => {}
+                }
+
                 // Look for ` *word` or ` &word` pattern (space before * or & then word char)
                 if b == b' ' && j + 2 < len {
                     let next = bytes[j + 1];

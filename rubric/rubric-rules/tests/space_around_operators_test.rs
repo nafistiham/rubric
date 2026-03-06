@@ -418,3 +418,19 @@ fn detects_bare_eq_without_spaces() {
     let diags = SpaceAroundOperators.check_source(&ctx);
     assert!(!diags.is_empty(), "x=1 should be flagged for missing spaces around =");
 }
+
+// ── False positive: `-` inside "string #{interpolation}" ─────────────────────
+// When a "..." string contains #{...} that itself contains another "..." string,
+// the inner `"` must not close the outer string state.
+#[test]
+fn no_false_positive_for_operator_in_string_interpolation() {
+    // `"attr-#{x}"` inside a double-quoted string — `-` is NOT an operator
+    let src = concat!(
+        "let(:html) { ",
+        r#""<body #{(1..n).map { |x| "attr-#{x}" }.join(' ')}>" "#,
+        "}\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(diags.is_empty(), "- inside interpolated string must not be flagged: {:?}", diags);
+}
