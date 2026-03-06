@@ -31,6 +31,23 @@ fn slash_starts_regex(line_bytes: &[u8], j: usize) -> bool {
     }
 }
 
+/// If `line` opens a heredoc, return the terminator string.
+fn extract_heredoc_terminator(line: &[u8]) -> Option<Vec<u8>> {
+    let n = line.len();
+    let mut i = 0;
+    while i + 1 < n {
+        if line[i] == b'<' && line[i + 1] == b'<' {
+            i += 2;
+            if i < n && (line[i] == b'-' || line[i] == b'~') { i += 1; }
+            if i < n && (line[i] == b'\'' || line[i] == b'"' || line[i] == b'`') { i += 1; }
+            let start = i;
+            while i < n && (line[i].is_ascii_alphanumeric() || line[i] == b'_') { i += 1; }
+            if i > start { return Some(line[start..i].to_vec()); }
+        } else { i += 1; }
+    }
+    None
+}
+
 impl Rule for SpaceAfterComma {
     fn name(&self) -> &'static str {
         "Layout/SpaceAfterComma"
@@ -38,15 +55,34 @@ impl Rule for SpaceAfterComma {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        for (i, line) in ctx.lines.iter().enumerate() {
+        let mut in_heredoc: Option<Vec<u8>> = None;
+        // Carry regex state across lines for multiline `/regex/x` literals.
+        let mut in_multiline_regex = false;
+        let lines = &ctx.lines;
+        let n = lines.len();
+        let mut i = 0;
+        while i < n {
+            let line = &lines[i];
+
+            // Skip heredoc body lines
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim().as_bytes() == term.as_slice() {
+                    in_heredoc = None;
+                }
+                i += 1;
+                continue;
+            }
+
             // Skip pure comment lines
             if line.trim_start().starts_with('#') {
+                i += 1;
                 continue;
             }
             let line_start = ctx.line_start_offsets[i] as usize;
             let line_bytes = line.as_bytes();
             let mut in_string: Option<u8> = None; // None = outside, Some(delim) = inside string
-            let mut in_regex = false; // inside /regex/
+            // Seed from cross-line state so multiline /regex/ bodies are skipped.
+            let mut in_regex = in_multiline_regex;
             let mut in_percent_regex = false; // inside %r{...}
             let mut percent_regex_depth: usize = 0; // brace depth inside %r{
             let mut j = 0;
@@ -181,6 +217,18 @@ impl Rule for SpaceAfterComma {
                 }
                 j += 1;
             }
+
+            // Persist regex state across lines (for multiline /regex/x literals).
+            in_multiline_regex = in_regex;
+
+            // Detect if this line opens a heredoc (body starts on the next line)
+            if in_heredoc.is_none() {
+                if let Some(term) = extract_heredoc_terminator(line_bytes) {
+                    in_heredoc = Some(term);
+                }
+            }
+
+            i += 1;
         }
         diags
     }

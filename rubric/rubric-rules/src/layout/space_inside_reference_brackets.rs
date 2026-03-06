@@ -21,15 +21,52 @@ impl Rule for SpaceInsideReferenceBrackets {
             let line_start = ctx.line_start_offsets[i] as usize;
             let mut pos = 0;
             let mut in_string: Option<u8> = None;
+            let mut in_regex = false;
 
             while pos < n {
                 let b = bytes[pos];
+
+                // Skip regex body — brackets inside regex are character classes, not reference brackets.
+                if in_regex {
+                    if b == b'\\' { pos += 2; continue; }
+                    if b == b'[' {
+                        // Character class — skip until closing ] (handling escapes)
+                        pos += 1;
+                        while pos < n {
+                            if bytes[pos] == b'\\' { pos += 2; continue; }
+                            if bytes[pos] == b']' { pos += 1; break; }
+                            pos += 1;
+                        }
+                        continue;
+                    }
+                    if b == b'/' { in_regex = false; pos += 1; continue; }
+                    pos += 1;
+                    continue;
+                }
+
                 match in_string {
                     Some(_) if b == b'\\' => { pos += 2; continue; }
                     Some(delim) if b == delim => { in_string = None; pos += 1; continue; }
                     Some(_) => { pos += 1; continue; }
                     None if b == b'"' || b == b'\'' => { in_string = Some(b); pos += 1; continue; }
                     None if b == b'#' => break,
+                    None if b == b'/' => {
+                        // Detect regex start: preceding non-space char is NOT an identifier end
+                        let prev = {
+                            let mut k = pos;
+                            loop {
+                                if k == 0 { break 0u8; }
+                                k -= 1;
+                                let pb = bytes[k];
+                                if pb != b' ' && pb != b'\t' { break pb; }
+                            }
+                        };
+                        if !(prev.is_ascii_alphanumeric() || prev == b'_' || prev == b')' || prev == b']') {
+                            in_regex = true;
+                        }
+                        pos += 1;
+                        continue;
+                    }
                     None => {}
                 }
 

@@ -27,3 +27,11 @@ fn no_false_positive_for_multiline_reference_close() {
     let diags = SpaceInsideReferenceBrackets.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations for multiline bracket close, got: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_space_in_regex_character_class() {
+    let src = "assert_match(/[A-Za-z][a-z ]/, @tester.geo)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideReferenceBrackets.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for regex char class with space, got: {:?}", diags);
+}

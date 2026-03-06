@@ -88,3 +88,32 @@ fn still_detects_missing_space_after_comma_in_args() {
     assert_eq!(diags.len(), 1, "should detect missing space in args, got: {:?}", diags);
     assert_eq!(diags[0].rule, "Layout/SpaceAfterComma");
 }
+
+// -- False positive: commas inside multiline /regex/ body should not be flagged --
+// e.g. `[!$()*+,;=]` as a regex character class inside `/(?:...)/iox`
+#[test]
+fn no_false_positive_for_comma_in_multiline_regex_char_class() {
+    let src = concat!(
+        "PATTERN = /(?:\n",
+        "  [a-z]+|\n",
+        "  [!$()*+,;=]\n",
+        ")/iox\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterComma.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations in multiline regex body, got: {:?}", diags);
+}
+
+// -- False positive: commas inside heredoc bodies should not be flagged -------
+#[test]
+fn no_false_positive_for_comma_in_heredoc_body() {
+    let src = concat!(
+        "  expect(response.body).to eq(<<~CSV)\n",
+        "    Account address,Show boosts,Notify on new posts\n",
+        "    username@domain,true,false\n",
+        "  CSV\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterComma.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations in heredoc CSV body, got: {:?}", diags);
+}

@@ -2,6 +2,23 @@ use rubric_core::{Diagnostic, Fix, FixSafety, LintContext, Rule, Severity, TextE
 
 pub struct SpaceInsideParens;
 
+/// If `line` opens a heredoc, return the terminator string.
+fn extract_heredoc_terminator(line: &[u8]) -> Option<Vec<u8>> {
+    let n = line.len();
+    let mut i = 0;
+    while i + 1 < n {
+        if line[i] == b'<' && line[i + 1] == b'<' {
+            i += 2;
+            if i < n && (line[i] == b'-' || line[i] == b'~') { i += 1; }
+            if i < n && (line[i] == b'\'' || line[i] == b'"' || line[i] == b'`') { i += 1; }
+            let start = i;
+            while i < n && (line[i].is_ascii_alphanumeric() || line[i] == b'_') { i += 1; }
+            if i > start { return Some(line[start..i].to_vec()); }
+        } else { i += 1; }
+    }
+    None
+}
+
 impl Rule for SpaceInsideParens {
     fn name(&self) -> &'static str {
         "Layout/SpaceInsideParens"
@@ -10,10 +27,51 @@ impl Rule for SpaceInsideParens {
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 
+        let mut in_heredoc: Option<Vec<u8>> = None;
+        let mut in_percent_regex: bool = false;
+        let mut percent_regex_depth: usize = 0;
+        let mut in_percent_regex_close: u8 = b'}';
+
         for (i, line) in ctx.lines.iter().enumerate() {
             let line_start = ctx.line_start_offsets[i] as usize;
             let bytes = line.as_bytes();
             let len = bytes.len();
+
+            // Skip heredoc body lines
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim().as_bytes() == term.as_slice() {
+                    in_heredoc = None;
+                }
+                continue;
+            }
+
+            // Continue scanning through a multiline %r{...} body
+            if in_percent_regex {
+                let mut k = 0;
+                while k < len {
+                    let b = bytes[k];
+                    if b == b'\\' { k += 2; continue; }
+                    let open_bracket = match in_percent_regex_close {
+                        b')' => b'(',
+                        b']' => b'[',
+                        b'}' => b'{',
+                        b'>' => b'<',
+                        c => c,
+                    };
+                    if b == in_percent_regex_close {
+                        if percent_regex_depth == 0 {
+                            in_percent_regex = false;
+                            break;
+                        }
+                        percent_regex_depth -= 1;
+                    } else if b == open_bracket {
+                        percent_regex_depth += 1;
+                    }
+                    k += 1;
+                }
+                continue;
+            }
+
             let mut in_string: Option<u8> = None;
             let mut in_regex = false;
 
@@ -36,6 +94,48 @@ impl Rule for SpaceInsideParens {
                     None if b == b'"' || b == b'\'' => { in_string = Some(b); j += 1; continue; }
                     None if b == b'#' => break, // comment
                     None => {}
+                }
+
+                // Detect %r{...} (or %r(...) etc.) percent regex opener
+                if b == b'%' && j + 1 < len && bytes[j + 1] == b'r' && j + 2 < len {
+                    let delim = bytes[j + 2];
+                    let close = match delim {
+                        b'{' => Some(b'}'),
+                        b'(' => Some(b')'),
+                        b'[' => Some(b']'),
+                        b'<' => Some(b'>'),
+                        _ => None,
+                    };
+                    if let Some(close_byte) = close {
+                        in_percent_regex = true;
+                        in_percent_regex_close = close_byte;
+                        percent_regex_depth = 0;
+                        j += 3; // skip %r{
+                        // Scan the rest of this line for the closing delimiter
+                        while j < len {
+                            let pb = bytes[j];
+                            if pb == b'\\' { j += 2; continue; }
+                            let open_bracket = match in_percent_regex_close {
+                                b')' => b'(',
+                                b']' => b'[',
+                                b'}' => b'{',
+                                b'>' => b'<',
+                                c => c,
+                            };
+                            if pb == in_percent_regex_close {
+                                if percent_regex_depth == 0 {
+                                    in_percent_regex = false;
+                                    j += 1;
+                                    break;
+                                }
+                                percent_regex_depth -= 1;
+                            } else if pb == open_bracket {
+                                percent_regex_depth += 1;
+                            }
+                            j += 1;
+                        }
+                        continue;
+                    }
                 }
 
                 // Detect regex opener: `/` preceded by `=`, `(`, `,`, `[`, space, tab, or
@@ -80,6 +180,13 @@ impl Rule for SpaceInsideParens {
                 }
 
                 j += 1;
+            }
+
+            // Detect if this line opens a heredoc (body starts on the next line)
+            if in_heredoc.is_none() {
+                if let Some(term) = extract_heredoc_terminator(bytes) {
+                    in_heredoc = Some(term);
+                }
             }
         }
 
