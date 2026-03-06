@@ -10,10 +10,50 @@ impl Rule for SpaceInsideHashLiteralBraces {
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 
+        let mut in_multiline_regex = false;
+        let mut in_percent_regex = false;
+        let mut percent_regex_depth = 0usize;
+
         for (i, line) in ctx.lines.iter().enumerate() {
-            let line_start = ctx.line_start_offsets[i] as usize;
             let bytes = line.as_bytes();
             let len = bytes.len();
+            let line_start = ctx.line_start_offsets[i] as usize;
+
+            // --- Multiline /regex/ body ---
+            if in_multiline_regex {
+                let mut j = 0;
+                while j < len {
+                    match bytes[j] {
+                        b'\\' => { j += 2; continue; }
+                        b'/' => { in_multiline_regex = false; break; }
+                        _ => { j += 1; }
+                    }
+                }
+                continue;
+            }
+
+            // --- Multiline %r{...} body ---
+            if in_percent_regex {
+                let mut j = 0;
+                while j < len {
+                    match bytes[j] {
+                        b'\\' => { j += 2; continue; }
+                        b'{' => { percent_regex_depth += 1; j += 1; }
+                        b'}' => {
+                            if percent_regex_depth > 0 {
+                                percent_regex_depth -= 1;
+                                j += 1;
+                            } else {
+                                in_percent_regex = false;
+                                break;
+                            }
+                        }
+                        _ => { j += 1; }
+                    }
+                }
+                continue;
+            }
+
             let mut in_string: Option<u8> = None;
 
             let mut j = 0;
@@ -45,6 +85,10 @@ impl Rule for SpaceInsideHashLiteralBraces {
                                     _ => { j += 1; }
                                 }
                             }
+                            if depth > 0 {
+                                in_percent_regex = true;
+                                percent_regex_depth = depth - 1;
+                            }
                         } else {
                             while j < len && bytes[j] != delim {
                                 if bytes[j] == b'\\' { j += 2; } else { j += 1; }
@@ -62,12 +106,16 @@ impl Rule for SpaceInsideHashLiteralBraces {
                         || prev == b'[' || prev == b' ' || prev == b'\t' || prev == 0
                     {
                         j += 1;
+                        let mut closed = false;
                         while j < len {
                             match bytes[j] {
                                 b'\\' => { j += 2; }
-                                b'/' => { j += 1; break; }
+                                b'/' => { closed = true; j += 1; break; }
                                 _ => { j += 1; }
                             }
+                        }
+                        if !closed {
+                            in_multiline_regex = true;
                         }
                         continue;
                     }

@@ -37,3 +37,30 @@ fn no_violation_for_percent_r_regex() {
     let diags = SpaceInsideHashLiteralBraces.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations in %r{{}} regex, got: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_braces_in_multiline_regex_body() {
+    // \{\{ and \}\} inside a multiline /regex/iox body are NOT hash braces
+    let src = concat!(
+        "RENDER_RE = /\n",
+        "  \\{\\{[^}]+\\}\\}\n",
+        "/iox\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideHashLiteralBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations in multiline regex body, got: {:?}", diags);
+}
+
+#[test]
+fn no_false_positive_for_closing_brace_of_multiline_percent_regex() {
+    // The closing } on its own line closes %r{...} — not a hash literal brace
+    let src = concat!(
+        "URL_RE = %r{\n",
+        "  (?:https?://)\n",
+        "  ([a-z]+\\.)+[a-z]+\n",
+        "}iox\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideHashLiteralBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for multiline %r{{}} close, got: {:?}", diags);
+}
