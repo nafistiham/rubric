@@ -64,3 +64,24 @@ fn no_false_positive_for_closing_brace_of_multiline_percent_regex() {
     let diags = SpaceInsideHashLiteralBraces.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations for multiline %r{{}} close, got: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_block_braces_with_params() {
+    // {|x|...} is a block, not a hash literal — both { and } should be skipped
+    let src = concat!(
+        "items.find{|i| i.name == name}\n",
+        "items.find {|i| i.name == name}\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideHashLiteralBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for block braces, got: {:?}", diags);
+}
+
+#[test]
+fn no_false_positive_for_percent_q_string() {
+    // %q{...} is a percent-quoted string, not a hash literal
+    let src = "let(:text) { %q{<img src=\"javascript:alert('XSS');\">} }\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideHashLiteralBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for %q{{}} string, got: {:?}", diags);
+}

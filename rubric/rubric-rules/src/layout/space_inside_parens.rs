@@ -96,6 +96,38 @@ impl Rule for SpaceInsideParens {
                     None => {}
                 }
 
+                // Skip bare %(...) — percent string using parens as delimiters
+                if b == b'%' && j + 1 < len && bytes[j + 1] == b'(' {
+                    j += 2; // skip %(
+                    let mut depth = 1usize;
+                    while j < len && depth > 0 {
+                        match bytes[j] {
+                            b'\\' => { j += 2; }
+                            b'(' => { depth += 1; j += 1; }
+                            b')' => { depth -= 1; j += 1; }
+                            _ => { j += 1; }
+                        }
+                    }
+                    continue;
+                }
+
+                // Skip %q(...), %Q(...), %w(...), %W(...), etc. with ( delimiter
+                if b == b'%' && j + 1 < len && bytes[j + 1].is_ascii_alphabetic()
+                    && bytes[j + 1] != b'r' && j + 2 < len && bytes[j + 2] == b'('
+                {
+                    j += 3; // skip %q(
+                    let mut depth = 1usize;
+                    while j < len && depth > 0 {
+                        match bytes[j] {
+                            b'\\' => { j += 2; }
+                            b'(' => { depth += 1; j += 1; }
+                            b')' => { depth -= 1; j += 1; }
+                            _ => { j += 1; }
+                        }
+                    }
+                    continue;
+                }
+
                 // Detect %r{...} (or %r(...) etc.) percent regex opener
                 if b == b'%' && j + 1 < len && bytes[j + 1] == b'r' && j + 2 < len {
                     let delim = bytes[j + 2];

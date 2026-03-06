@@ -74,3 +74,21 @@ fn no_false_positive_for_paren_in_heredoc_body() {
     let diags = SpaceInsideParens.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations inside heredoc SQL body, got: {:?}", diags);
 }
+
+// FP: %(...) bare percent string uses ( ) as string delimiters — not Ruby parens
+#[test]
+fn no_false_positive_for_bare_percent_string_with_parens() {
+    let src = "cmd = %( ruby -e \"#{code}\" )\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideParens.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for bare %() string, got: {:?}", diags);
+}
+
+// FP: %q(...) percent string uses ( ) as string delimiters — not Ruby parens
+#[test]
+fn no_false_positive_for_percent_q_string_with_parens() {
+    let src = "text = %q( hello world )\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideParens.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for %q() string, got: {:?}", diags);
+}

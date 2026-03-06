@@ -69,8 +69,9 @@ impl Rule for SpaceInsideHashLiteralBraces {
                     None => {}
                 }
 
-                // Skip %r{...} and other %r delimiters — regex literals
-                if b == b'%' && j + 1 < len && bytes[j + 1] == b'r' {
+                // Skip %r{...}, %q{...}, %Q{...}, %w{...}, %W{...}, %i{...}, %I{...} etc.
+                let is_percent_lit = j + 1 < len && matches!(bytes[j + 1], b'r' | b'q' | b'Q' | b'w' | b'W' | b'i' | b'I' | b's' | b'x');
+                if b == b'%' && is_percent_lit {
                     j += 2;
                     if j < len {
                         let delim = bytes[j];
@@ -127,6 +128,20 @@ impl Rule for SpaceInsideHashLiteralBraces {
                     // Skip empty braces `{}`
                     if next == b'}' {
                         j += 2;
+                        continue;
+                    }
+                    // Skip block braces {|params| body} — these are blocks, not hash literals
+                    if next == b'|' {
+                        j += 1; // past `{`
+                        let mut depth = 1usize;
+                        while j < len && depth > 0 {
+                            match bytes[j] {
+                                b'\\' => { j += 2; }
+                                b'{' => { depth += 1; j += 1; }
+                                b'}' => { depth -= 1; j += 1; }
+                                _ => { j += 1; }
+                            }
+                        }
                         continue;
                     }
                     // Flag if next char is not a space
