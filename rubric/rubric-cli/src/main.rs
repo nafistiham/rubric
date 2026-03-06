@@ -290,6 +290,40 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
     ]
 }
 
+/// Returns true if `file_path` matches any exclude pattern relative to `root`.
+/// Supports simple glob patterns with `*` (not `**`).
+fn is_excluded(file_path: &std::path::Path, root: &std::path::Path, patterns: &[String]) -> bool {
+    let rel = file_path.strip_prefix(root).unwrap_or(file_path);
+    let rel_str = rel.to_string_lossy();
+    patterns.iter().any(|pat| glob_match_exclude(&rel_str, pat))
+}
+
+/// Match a relative path string against a simple glob pattern.
+/// Supports `*` as a wildcard (matches any sequence of characters including `/`).
+fn glob_match_exclude(path: &str, pattern: &str) -> bool {
+    if !pattern.contains('*') {
+        return path == pattern || path.ends_with(&format!("/{pattern}"));
+    }
+    // Split on `*` and verify parts appear in order in the path.
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut remaining = path;
+    for (idx, part) in parts.iter().enumerate() {
+        if part.is_empty() { continue; }
+        if idx == 0 {
+            if !remaining.starts_with(part) { return false; }
+            remaining = &remaining[part.len()..];
+        } else if idx == parts.len() - 1 && !pattern.ends_with('*') {
+            // Last non-empty part must appear at the end
+            if !remaining.ends_with(part) { return false; }
+        } else if let Some(pos) = remaining.find(part) {
+            remaining = &remaining[pos + part.len()..];
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -305,7 +339,10 @@ fn main() -> Result<()> {
 
             let rules = build_rules_with_config(&config);
 
-            let files = runner::collect_ruby_files(&path);
+            let files: Vec<_> = runner::collect_ruby_files(&path)
+                .into_iter()
+                .filter(|f| !is_excluded(f, &config_dir, &config.exclude))
+                .collect();
             if files.is_empty() {
                 println!("No Ruby files found.");
                 return Ok(());
