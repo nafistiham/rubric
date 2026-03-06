@@ -118,6 +118,8 @@ impl Rule for DefEndAlignment {
             let is_def_opener = !is_one_liner(t) && !is_endless_method(t) && (
                 t.starts_with("def ") || t == "def"
                 || t.starts_with("private def ") || t.starts_with("protected def ")
+                || t.starts_with("private_class_method def ")
+                || t.starts_with("module_function def ")
                 || t.starts_with("class ") || t.starts_with("module ")
             );
 

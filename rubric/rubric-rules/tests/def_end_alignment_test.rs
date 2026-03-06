@@ -393,3 +393,28 @@ fn still_detects_misalignment_after_do_block_end_comma() {
     let diags = DefEndAlignment.check_source(&ctx);
     assert!(!diags.is_empty(), "expected violation for misaligned def end after end,, got none");
 }
+
+// `private_class_method def self.method_name` — the `def` is preceded by a
+// modifier keyword. The `end` of this method must align with the `private_class_method`
+// line's indent, not with the surrounding class/module indent.
+#[test]
+fn no_false_positive_for_private_class_method_def() {
+    let src = concat!(
+        "module Foo\n",
+        "  private_class_method def self.bar(x)\n",
+        "    x + 1\n",
+        "  end\n",
+        "\n",
+        "  def self.baz\n",
+        "    42\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "`private_class_method def self.bar` must not be flagged, got: {:?}",
+        diags
+    );
+}
