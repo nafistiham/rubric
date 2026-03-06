@@ -15,8 +15,9 @@ impl Rule for MultilineHashBraceLayout {
         for i in 1..n {
             let line = &lines[i];
             let trimmed = line.trim();
-            // Look for `}` at end of a line with content (multiline hash closing on same line)
-            if trimmed.ends_with('}') && !trimmed.starts_with('{') && trimmed.len() > 1 {
+            // Look for `}` at end of a line with content (multiline hash closing on same line).
+            // Skip comment lines — `# }` in doc comments must not be treated as code.
+            if trimmed.ends_with('}') && !trimmed.starts_with('{') && !trimmed.starts_with('#') && trimmed.len() > 1 {
                 let closing_alone = trimmed == "}";
                 if !closing_alone {
                     // If the line has as many (or more) `{` as `}`, the closing `}` is
@@ -41,6 +42,8 @@ impl Rule for MultilineHashBraceLayout {
                     while j > 0 {
                         j -= 1;
                         let prev = lines[j].trim();
+                        // Skip comment lines — don't let `# {` trigger is_multiline
+                        if prev.starts_with('#') { continue; }
                         if prev.trim_end().ends_with('{') {
                             is_multiline = true;
                             break;

@@ -89,6 +89,23 @@ fn no_false_positive_for_string_interpolation_ending_with_brace() {
     assert!(diags.is_empty(), "interpolation `#{{ld_json}}` in heredoc falsely flagged: {:?}", diags);
 }
 
+// FP: `# }` in comment lines (doc comments showing hash structure) must NOT fire
+#[test]
+fn no_false_positive_for_closing_brace_in_comment() {
+    let src = concat!(
+        "# Example hash:\n",
+        "# {\n",
+        "#   key: 'value',\n",
+        "# }\n",
+        "def process\n",
+        "  data\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = MultilineHashBraceLayout.check_source(&ctx);
+    assert!(diags.is_empty(), "`# }}` in comment must not be flagged: {:?}", diags);
+}
+
 // FP: `\}\}` inside a multiline regex body — backslash-escaped braces
 #[test]
 fn no_false_positive_for_escaped_braces_in_regex() {
