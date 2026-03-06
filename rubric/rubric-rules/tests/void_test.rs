@@ -125,6 +125,41 @@ fn no_false_positive_for_branch_return_before_elsif() {
     assert!(diags.is_empty(), "branch return before `elsif` falsely flagged: {:?}", diags);
 }
 
+// Continuation line starting with `)` (closing a multi-line parenthesised expression)
+// must NOT be treated as a standalone void expression.
+// E.g. `checksum = (\n  7 * x +\n  ...\n) % 10`
+#[test]
+fn no_false_positive_for_closing_paren_continuation() {
+    let src = concat!(
+        "def checksum(n)\n",
+        "  sum = (\n",
+        "    7 * n[0] +\n",
+        "    3 * n[1]\n",
+        "  ) % 10\n",
+        "  sum\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = Void.check_source(&ctx);
+    assert!(diags.is_empty(), "closing `) % 10` continuation line falsely flagged: {:?}", diags);
+}
+
+// Logical `||` continuation — the second line is part of the same expression.
+// When the previous line ends with `||`, the current line is a continuation.
+#[test]
+fn no_false_positive_for_logical_or_continuation() {
+    let src = concat!(
+        "def valid?(x, y)\n",
+        "  return 'a' if foo.include?(x) ||\n",
+        "                y == 0\n",
+        "  'b'\n",     // next non-empty line is NOT end/else → must rely on prev-line check
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = Void.check_source(&ctx);
+    assert!(diags.is_empty(), "logical `||` continuation line falsely flagged: {:?}", diags);
+}
+
 // `end % n % m` — chained on block result, not standalone void expression
 #[test]
 fn no_false_positive_for_end_chained_expression() {

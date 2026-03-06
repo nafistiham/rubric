@@ -18,6 +18,33 @@ impl Rule for Void {
                 continue;
             }
 
+            // Skip continuation lines: lines that start with `)` are closing
+            // a multi-line parenthesised expression — the arithmetic on that
+            // closing line (e.g. `) % 10`) is part of the parent assignment.
+            if t.starts_with(')') {
+                continue;
+            }
+
+            // Skip lines that are a continuation of the previous non-empty line.
+            // A continuation is indicated by the previous line ending with a binary
+            // operator or a backslash: +, -, *, /, %, |, &, ^, ||, &&, \.
+            let prev_code = if i > 0 {
+                ctx.lines[..i].iter().rev()
+                    .map(|l| l.trim())
+                    .find(|l| !l.is_empty() && !l.starts_with('#'))
+            } else { None };
+            let prev_ends_with_operator = prev_code.map(|p| {
+                p.ends_with("||") || p.ends_with("&&")
+                    || p.ends_with(" +") || p.ends_with(" -")
+                    || p.ends_with(" *") || p.ends_with(" /")
+                    || p.ends_with(" %") || p.ends_with(" |")
+                    || p.ends_with(" &") || p.ends_with(" ^")
+                    || p.ends_with('\\')
+            }).unwrap_or(false);
+            if prev_ends_with_operator {
+                continue;
+            }
+
             // Skip lines that start with keywords or assignments
             if t.starts_with("if ") || t.starts_with("unless ") || t.starts_with("while ")
                 || t.starts_with("until ") || t.starts_with("def ") || t.starts_with("class ")
