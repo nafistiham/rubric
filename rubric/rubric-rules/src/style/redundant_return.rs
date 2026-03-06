@@ -25,7 +25,9 @@ impl Rule for RedundantReturn {
                        || t.starts_with("module ") || t.starts_with("if ")
                        || t.starts_with("unless ") || t.starts_with("while ")
                        || t.starts_with("until ") || t.starts_with("for ")
-                       || t == "do" || t.ends_with(" do") || t.starts_with("begin") {
+                       || t == "case" || t.starts_with("case ")
+                       || t == "do" || t.ends_with(" do") || t.contains(" do |") || t.contains(" do|")
+                       || t.starts_with("begin") {
                         depth += 1;
                     } else if t == "end" {
                         depth -= 1;
