@@ -44,8 +44,10 @@ impl Rule for AmbiguousRegexpLiteral {
                     let mut j = pos + 1;
                     while j < n && bytes[j] == b' ' { j += 1; }
                     // Must be `/` (regex start) but NOT `/=` (compound division-assign)
+                    // and NOT `/ ` (space after `/` = arithmetic division — unambiguous).
+                    // A regex literal `/pattern/` has non-space content after the `/`.
                     if j < n && bytes[j] == b'/'
-                        && (j + 1 >= n || bytes[j + 1] != b'=')
+                        && (j + 1 >= n || (bytes[j + 1] != b'=' && bytes[j + 1] != b' '))
                     {
                         let indent = line.len() - trimmed.len();
                         let line_start = ctx.line_start_offsets[i] as usize;

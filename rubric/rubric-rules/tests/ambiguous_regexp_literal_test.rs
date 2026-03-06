@@ -19,3 +19,13 @@ fn no_violation_on_clean() {
     let diags = AmbiguousRegexpLiteral.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations on clean code");
 }
+
+// Division `a / b` (space after `/`) is NOT ambiguous — it's clearly arithmetic.
+// Only `method /pattern/` (no space after `/`) is ambiguous.
+#[test]
+fn no_false_positive_for_division_with_space() {
+    let src = "def ratio(a, b)\n  if a > b\n    a / b\n  else\n    b / a\n  end\nend\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = AmbiguousRegexpLiteral.check_source(&ctx);
+    assert!(diags.is_empty(), "division `a / b` with space must not be flagged: {:?}", diags);
+}
