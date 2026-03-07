@@ -2,6 +2,24 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct FirstArrayElementIndentation;
 
+fn extract_heredoc_terminator(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i + 1 < len {
+        if bytes[i] == b'<' && bytes[i + 1] == b'<' {
+            let mut j = i + 2;
+            if j < len && (bytes[j] == b'-' || bytes[j] == b'~') { j += 1; }
+            if j < len && (bytes[j] == b'\'' || bytes[j] == b'"' || bytes[j] == b'`') { j += 1; }
+            let start = j;
+            while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') { j += 1; }
+            if j > start { return Some(line[start..j].to_string()); }
+        }
+        i += 1;
+    }
+    None
+}
+
 impl Rule for FirstArrayElementIndentation {
     fn name(&self) -> &'static str {
         "Layout/FirstArrayElementIndentation"
@@ -11,10 +29,26 @@ impl Rule for FirstArrayElementIndentation {
         let mut diags = Vec::new();
         let lines = &ctx.lines;
         let n = lines.len();
+        let mut in_heredoc: Option<String> = None;
 
         for i in 0..n {
             let line = &lines[i];
             let trimmed = line.trim_start();
+
+            // Skip heredoc body lines
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim() == term.as_str() {
+                    in_heredoc = None;
+                }
+                continue;
+            }
+
+            // Detect heredoc opener — body starts on next line
+            if let Some(term) = extract_heredoc_terminator(line) {
+                in_heredoc = Some(term);
+                // Fall through: opener line may contain a real `[`
+            }
+
             if trimmed.starts_with('#') {
                 continue;
             }
