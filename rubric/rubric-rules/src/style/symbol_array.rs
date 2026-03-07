@@ -11,12 +11,29 @@ impl Rule for SymbolArray {
         let mut diags = Vec::new();
 
         for (i, line) in ctx.lines.iter().enumerate() {
+            // Skip comment lines — symbol arrays in doc examples must not be flagged
+            if line.trim_start().starts_with('#') {
+                continue;
+            }
             let line_start = ctx.line_start_offsets[i] as usize;
             let bytes = line.as_bytes();
             let len = bytes.len();
             let mut j = 0;
+            let mut in_string: Option<u8> = None;
 
             while j < len {
+                // ── String state: skip characters inside string literals ──
+                match in_string {
+                    Some(_) if bytes[j] == b'\\' => { j += 2; continue; }
+                    Some(delim) if bytes[j] == delim => { in_string = None; j += 1; continue; }
+                    Some(_) => { j += 1; continue; }
+                    None if bytes[j] == b'"' || bytes[j] == b'\'' || bytes[j] == b'`' => {
+                        in_string = Some(bytes[j]); j += 1; continue;
+                    }
+                    None if bytes[j] == b'#' => break, // inline comment — stop
+                    None => {}
+                }
+
                 // Look for `[` to start an array literal
                 if bytes[j] != b'[' {
                     j += 1;

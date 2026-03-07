@@ -21,3 +21,12 @@ fn no_violation_with_percent_i_syntax() {
     let diags = SymbolArray.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+// Symbol arrays in YARD/RDoc comment examples must not be flagged
+#[test]
+fn no_false_positive_for_symbol_array_in_comment() {
+    let src = "#   Faker::Date.on_day(day: [:saturday, :sunday])\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SymbolArray.check_source(&ctx);
+    assert!(diags.is_empty(), "symbol array in comment falsely flagged: {:?}", diags);
+}
