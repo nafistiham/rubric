@@ -37,3 +37,12 @@ fn no_violation_for_percent_r_regex() {
     let diags = SpaceBeforeBlockBraces.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations for %r{{}} regex, got: {:?}", diags);
 }
+
+// %q{...}, %Q{...}, %w{...}, %i{...}, etc. — brace is a string/array delimiter, not a block
+#[test]
+fn no_false_positive_for_percent_q_brace_literal() {
+    let src = "let(:text) { %q{<img src=\"javascript:alert('XSS');\">} }\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceBeforeBlockBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "percent-q brace literal falsely flagged: {:?}", diags);
+}

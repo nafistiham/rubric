@@ -35,8 +35,9 @@ impl Rule for SpaceBeforeBlockBraces {
                     None => {}
                 }
 
-                // Skip %r{...} and other %r delimiters — regex literals
-                if b == b'%' && j + 1 < len && bytes[j + 1] == b'r' {
+                // Skip %r{...}, %q{...}, %Q{...}, %w{...}, %W{...}, %i{...}, %I{...}, %s{...}, %x{...}
+                // When the percent-literal uses `{` as delimiter, the `}` closes it — not a block brace
+                if b == b'%' && j + 1 < len && bytes[j + 1].is_ascii_alphabetic() {
                     j += 2;
                     if j < len {
                         let delim = bytes[j];
@@ -52,7 +53,10 @@ impl Rule for SpaceBeforeBlockBraces {
                                 }
                             }
                         } else {
-                            while j < len && bytes[j] != delim {
+                            let close = match delim {
+                                b'(' => b')', b'[' => b']', b'<' => b'>', _ => delim,
+                            };
+                            while j < len && bytes[j] != close {
                                 if bytes[j] == b'\\' { j += 2; } else { j += 1; }
                             }
                             if j < len { j += 1; }
