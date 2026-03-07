@@ -21,3 +21,19 @@ fn no_violation_for_correct_case_indentation() {
     let diags = CaseIndentation.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+// SQL case/when inside heredoc body must not be flagged
+#[test]
+fn no_false_positive_for_case_when_in_heredoc_body() {
+    let src = concat!(
+        "SQL = <<~SQL\n",
+        "  case\n",
+        "      when col is null then 0\n",    // deeply indented — not Ruby indent
+        "      else 1\n",
+        "  end\n",
+        "SQL\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = CaseIndentation.check_source(&ctx);
+    assert!(diags.is_empty(), "case/when in heredoc falsely flagged: {:?}", diags);
+}
