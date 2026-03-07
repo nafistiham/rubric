@@ -60,7 +60,18 @@ impl Rule for UselessComparison {
                             Some(b'.') | Some(b':') | Some(b'@')
                         );
 
-                    if !rhs.is_empty() && lhs == rhs && !lhs_has_receiver {
+                    // Skip if a binary operator precedes the LHS (with optional space).
+                    // e.g. `computed_permissions & permissions != permissions` — the `&`
+                    // makes the full LHS a compound expression, not just `permissions`.
+                    let mut k = lhs_start;
+                    while k > 0 && before_bytes[k - 1] == b' ' { k -= 1; }
+                    let lhs_has_operator_prefix = k > 0
+                        && matches!(
+                            before_bytes[k - 1],
+                            b'&' | b'|' | b'^' | b'+' | b'-' | b'*' | b'/' | b'%'
+                        );
+
+                    if !rhs.is_empty() && lhs == rhs && !lhs_has_receiver && !lhs_has_operator_prefix {
                         let line_start = ctx.line_start_offsets[i] as usize;
                         let op_pos = (line_start + abs_pos) as u32;
                         diags.push(Diagnostic {

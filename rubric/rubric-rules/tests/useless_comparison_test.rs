@@ -41,3 +41,14 @@ fn no_false_positive_for_class_inheritance() {
     let diags = UselessComparison.check_source(&ctx);
     assert!(diags.is_empty(), "class inheritance `<` falsely flagged: {:?}", diags);
 }
+
+// `computed_permissions & permissions != permissions` — the LHS of `!=` is the
+// result of `computed_permissions & permissions` (bitwise AND), not just `permissions`.
+// Must NOT be flagged as comparing `permissions` to itself.
+#[test]
+fn no_false_positive_for_bitwise_and_before_comparison() {
+    let src = "errors.add(:k, :v) if acct.computed_permissions & permissions != permissions\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = UselessComparison.check_source(&ctx);
+    assert!(diags.is_empty(), "bitwise-AND compound LHS falsely flagged: {:?}", diags);
+}

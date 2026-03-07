@@ -23,36 +23,53 @@ impl Rule for SpaceAroundKeyword {
 
             let bytes = line.as_bytes();
             let len = bytes.len();
+            let line_start = ctx.line_start_offsets[i];
 
-            for kw in KEYWORDS {
-                let kw_bytes = kw.as_bytes();
-                let kw_len = kw_bytes.len();
-                let mut j = 0;
-                while j + kw_len <= len {
-                    // Check if this position has the keyword
-                    if &bytes[j..j + kw_len] == kw_bytes {
-                        // Check word boundary before (also exclude `.` — method calls like `.not(` should not fire)
-                        let before_ok = j == 0 || (!bytes[j - 1].is_ascii_alphanumeric() && bytes[j - 1] != b'_' && bytes[j - 1] != b'.');
-                        // Check what comes after the keyword
-                        let after_pos = j + kw_len;
-                        if before_ok && after_pos < len && bytes[after_pos] == b'(' {
-                            // keyword immediately followed by '(' — violation
-                            let line_start = ctx.line_start_offsets[i];
-                            let kw_start = line_start + j as u32;
-                            let kw_end = kw_start + kw_len as u32;
-                            diags.push(Diagnostic {
-                                rule: self.name(),
-                                message: format!(
-                                    "Keyword `{}` should be followed by a space.",
-                                    kw
-                                ),
-                                range: TextRange::new(kw_start, kw_end),
-                                severity: Severity::Warning,
-                            });
-                        }
+            // Single-pass scan with string-literal tracking
+            let mut in_string: Option<u8> = None;
+            let mut j = 0;
+            while j < len {
+                let b = bytes[j];
+
+                // ── String state ────────────────────────────────────────────
+                match in_string {
+                    Some(_) if b == b'\\' => { j += 2; continue; }
+                    Some(delim) if b == delim => { in_string = None; j += 1; continue; }
+                    Some(_) => { j += 1; continue; }
+                    None if b == b'"' || b == b'\'' || b == b'`' => {
+                        in_string = Some(b); j += 1; continue;
                     }
-                    j += 1;
+                    None if b == b'#' => break, // inline comment — stop
+                    None => {}
                 }
+
+                // ── Check each keyword at position j ─────────────────────
+                for kw in KEYWORDS {
+                    let kw_bytes = kw.as_bytes();
+                    let kw_len = kw_bytes.len();
+                    if j + kw_len > len { continue; }
+                    if &bytes[j..j + kw_len] != kw_bytes { continue; }
+
+                    // Word boundary before: no alphanumeric/underscore/dot preceding
+                    let before_ok = j == 0 || {
+                        let pb = bytes[j - 1];
+                        !pb.is_ascii_alphanumeric() && pb != b'_' && pb != b'.'
+                    };
+                    // Keyword immediately followed by `(`
+                    let after_pos = j + kw_len;
+                    if before_ok && after_pos < len && bytes[after_pos] == b'(' {
+                        let kw_start = line_start + j as u32;
+                        let kw_end = kw_start + kw_len as u32;
+                        diags.push(Diagnostic {
+                            rule: self.name(),
+                            message: format!("Keyword `{}` should be followed by a space.", kw),
+                            range: TextRange::new(kw_start, kw_end),
+                            severity: Severity::Warning,
+                        });
+                    }
+                }
+
+                j += 1;
             }
         }
 

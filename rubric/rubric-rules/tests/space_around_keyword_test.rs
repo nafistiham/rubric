@@ -47,3 +47,13 @@ fn still_detects_keyword_without_space_before_paren() {
     let diags = SpaceAroundKeyword.check_source(&ctx);
     assert!(!diags.is_empty(), "expected violation for not( without preceding dot, got none");
 }
+
+// Keywords inside string literals must not be flagged
+// e.g. XPath expression `not(` inside a single-quoted string
+#[test]
+fn no_false_positive_for_keyword_inside_string() {
+    let src = "tree.xpath('./text()|.//text()[not(ancestor)]').to_a\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundKeyword.check_source(&ctx);
+    assert!(diags.is_empty(), "keyword inside string falsely flagged: {:?}", diags);
+}
