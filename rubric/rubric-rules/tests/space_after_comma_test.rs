@@ -104,6 +104,29 @@ fn no_false_positive_for_comma_in_multiline_regex_char_class() {
     assert!(diags.is_empty(), "expected no violations in multiline regex body, got: {:?}", diags);
 }
 
+// -- False positive: commas inside %w[...] word arrays ────────────────────────
+// `foo,3` inside `%w[sidekiq -q foo,3]` is a single word token, not a comma sep.
+#[test]
+fn no_false_positive_for_comma_in_percent_w_array() {
+    let src = "@cli.parse(%w[sidekiq -q foo,3 -q bar])\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterComma.check_source(&ctx);
+    assert!(diags.is_empty(), "comma inside %w[] falsely flagged: {:?}", diags);
+}
+
+// -- False positive: commas in multiline %w[...] continuation lines -----------
+#[test]
+fn no_false_positive_for_comma_in_multiline_percent_w() {
+    let src = concat!(
+        "@cli.parse(%w[sidekiq\n",
+        "  -q often,7\n",
+        "  -q seldom,3])\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterComma.check_source(&ctx);
+    assert!(diags.is_empty(), "comma in multiline %w[] falsely flagged: {:?}", diags);
+}
+
 // -- False positive: commas inside heredoc bodies should not be flagged -------
 #[test]
 fn no_false_positive_for_comma_in_heredoc_body() {

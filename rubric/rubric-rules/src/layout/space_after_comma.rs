@@ -58,6 +58,8 @@ impl Rule for SpaceAfterComma {
         let mut in_heredoc: Option<Vec<u8>> = None;
         // Carry regex state across lines for multiline `/regex/x` literals.
         let mut in_multiline_regex = false;
+        // Skip comma checking inside multiline %w[...], %W[...], %i[...], %I[...].
+        let mut in_percent_word_array = false;
         let lines = &ctx.lines;
         let n = lines.len();
         let mut i = 0;
@@ -68,6 +70,17 @@ impl Rule for SpaceAfterComma {
             if let Some(ref term) = in_heredoc.clone() {
                 if line.trim().as_bytes() == term.as_slice() {
                     in_heredoc = None;
+                }
+                i += 1;
+                continue;
+            }
+
+            // Skip lines inside a multiline %w[...] / %W[...] / %i[...] / %I[...].
+            // Words in these arrays are space-separated; commas are part of words.
+            if in_percent_word_array {
+                // Check if the closing `]` appears on this line
+                if line.contains(']') {
+                    in_percent_word_array = false;
                 }
                 i += 1;
                 continue;
@@ -199,6 +212,37 @@ impl Rule for SpaceAfterComma {
                     None if b == b'/' && slash_starts_regex(line_bytes, j) => {
                         in_regex = true;
                         j += 1;
+                        continue;
+                    }
+                    // Detect %w[...], %W[...], %i[...], %I[...] word arrays.
+                    // Commas inside these are word characters, not separators.
+                    None if b == b'%'
+                        && j + 2 < line_bytes.len()
+                        && matches!(line_bytes[j + 1], b'w' | b'W' | b'i' | b'I') =>
+                    {
+                        let open = if j + 2 < line_bytes.len() { line_bytes[j + 2] } else { 0 };
+                        let close = match open {
+                            b'(' => b')', b'[' => b']', b'{' => b'}', b'<' => b'>',
+                            _ => 0,
+                        };
+                        if close != 0 {
+                            j += 3; // skip %w[
+                            let mut depth = 1usize;
+                            while j < line_bytes.len() && depth > 0 {
+                                match line_bytes[j] {
+                                    b'\\' => { j += 2; }
+                                    c if c == open => { depth += 1; j += 1; }
+                                    c if c == close => { depth -= 1; j += 1; }
+                                    _ => { j += 1; }
+                                }
+                            }
+                            if depth > 0 {
+                                // Array continues on next lines
+                                in_percent_word_array = true;
+                            }
+                        } else {
+                            j += 1;
+                        }
                         continue;
                     }
                     None if b == b',' => {
