@@ -16,6 +16,11 @@ impl Rule for FirstHashElementIndentation {
             let line = &lines[i];
             let trimmed = line.trim_end();
 
+            // Skip comment lines — hash literals in doc examples must not be flagged
+            if trimmed.trim_start().starts_with('#') {
+                continue;
+            }
+
             // Check if this line ends with `{` (indicating a multi-line hash opening)
             if !trimmed.ends_with('{') {
                 continue;

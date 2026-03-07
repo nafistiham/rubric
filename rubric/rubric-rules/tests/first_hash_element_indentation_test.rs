@@ -21,3 +21,18 @@ fn no_violation_with_correct_hash_indentation() {
     let diags = FirstHashElementIndentation.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations, got: {:?}", diags);
 }
+
+// Hash literals inside YARD/RDoc comment examples must not be flagged
+#[test]
+fn no_false_positive_for_hash_in_comment() {
+    let src = concat!(
+        "# @example\n",
+        "#   Faker::Bird.name #=> {\n",
+        "#     order: 'Accipitriformes',\n",
+        "#     common_name: 'Hawk'\n",
+        "#   }\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = FirstHashElementIndentation.check_source(&ctx);
+    assert!(diags.is_empty(), "hash in comment falsely flagged: {:?}", diags);
+}
