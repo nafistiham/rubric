@@ -2,6 +2,22 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct RedundantSplatExpansion;
 
+/// Returns true when `/` at position `j` in `bytes` starts a regex literal
+/// rather than a division operator.
+fn slash_starts_regex(bytes: &[u8], j: usize) -> bool {
+    let mut k = j;
+    loop {
+        if k == 0 { return true; }
+        k -= 1;
+        let b = bytes[k];
+        if b == b' ' || b == b'\t' { continue; }
+        if b.is_ascii_alphanumeric() || b == b'_' || b == b')' || b == b']' {
+            return false;
+        }
+        return true;
+    }
+}
+
 impl Rule for RedundantSplatExpansion {
     fn name(&self) -> &'static str {
         "Lint/RedundantSplatExpansion"
@@ -76,6 +92,27 @@ impl Rule for RedundantSplatExpansion {
                     let _ = has_type;
                     continue;
                 }
+            }
+
+            // ── Skip regex literals: /pattern/ ───────────────────────────────
+            if b == b'/' && slash_starts_regex(bytes, i) {
+                i += 1; // skip opening `/`
+                while i < n && bytes[i] != b'/' && bytes[i] != b'\n' {
+                    if bytes[i] == b'\\' { i += 2; continue; }
+                    if bytes[i] == b'[' {
+                        // character class — skip until `]`
+                        i += 1;
+                        while i < n && bytes[i] != b']' && bytes[i] != b'\n' {
+                            if bytes[i] == b'\\' { i += 2; continue; }
+                            i += 1;
+                        }
+                        if i < n { i += 1; } // skip `]`
+                        continue;
+                    }
+                    i += 1;
+                }
+                if i < n { i += 1; } // skip closing `/`
+                continue;
             }
 
             // ── Detect `*[` ──────────────────────────────────────────────────

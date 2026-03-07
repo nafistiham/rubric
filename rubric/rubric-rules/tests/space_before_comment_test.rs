@@ -33,3 +33,19 @@ fn no_false_positive_on_hash_in_url() {
         diags
     );
 }
+
+// YARD doc comments use `##` which must not be flagged as missing-space-before-comment
+#[test]
+fn no_false_positive_for_double_hash_doc_comment() {
+    let src = concat!(
+        "# frozen_string_literal: true\n",
+        "\n",
+        "##\n",
+        "# A high-level description of the class.\n",
+        "class Foo\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceBeforeComment.check_source(&ctx);
+    assert!(diags.is_empty(), "## doc comment falsely flagged: {:?}", diags);
+}

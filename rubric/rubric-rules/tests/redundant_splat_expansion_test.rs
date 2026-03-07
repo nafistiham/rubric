@@ -39,3 +39,14 @@ fn no_false_positive_for_splat_with_method_chain() {
     let diags = RedundantSplatExpansion.check_source(&ctx);
     assert!(diags.is_empty(), "*[...].method must not be flagged: {:?}", diags);
 }
+
+// ── False positive: `*[` inside a regex literal ──────────────────────────────
+// e.g. `/Li(Po\s|-)[3-4]*[A-Za-z]+/` — the `*` is a quantifier, `[` starts a
+// character class, and neither constitutes a splat expansion.
+#[test]
+fn no_false_positive_for_star_bracket_in_regex() {
+    let src = "assert_match(/Li(Po\\s|-)[3-4]*[A-Za-z]+/, @tester.battery_type)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = RedundantSplatExpansion.check_source(&ctx);
+    assert!(diags.is_empty(), "*[ inside regex must not be flagged: {:?}", diags);
+}

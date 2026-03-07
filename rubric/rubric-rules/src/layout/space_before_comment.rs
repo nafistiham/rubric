@@ -10,6 +10,10 @@ impl Rule for SpaceBeforeComment {
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         for (i, line) in ctx.lines.iter().enumerate() {
+            // Skip standalone comment lines — only flag inline comments after code
+            if line.trim_start().starts_with('#') {
+                continue;
+            }
             let bytes = line.as_bytes();
             let line_start = ctx.line_start_offsets[i] as usize;
             for (j, &b) in bytes.iter().enumerate() {
