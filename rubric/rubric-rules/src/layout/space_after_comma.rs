@@ -58,6 +58,10 @@ impl Rule for SpaceAfterComma {
         let mut in_heredoc: Option<Vec<u8>> = None;
         // Carry regex state across lines for multiline `/regex/x` literals.
         let mut in_multiline_regex = false;
+        // Carry %r{...} state across lines so `/` inside multiline %r bodies
+        // is not misdetected as starting a new regex literal.
+        let mut in_multiline_percent_regex = false;
+        let mut multiline_percent_regex_depth: usize = 0;
         // Skip comma checking inside multiline %w[...], %W[...], %i[...], %I[...].
         let mut in_percent_word_array = false;
         let lines = &ctx.lines;
@@ -94,10 +98,10 @@ impl Rule for SpaceAfterComma {
             let line_start = ctx.line_start_offsets[i] as usize;
             let line_bytes = line.as_bytes();
             let mut in_string: Option<u8> = None; // None = outside, Some(delim) = inside string
-            // Seed from cross-line state so multiline /regex/ bodies are skipped.
+            // Seed from cross-line state so multiline /regex/ and %r{} bodies are skipped.
             let mut in_regex = in_multiline_regex;
-            let mut in_percent_regex = false; // inside %r{...}
-            let mut percent_regex_depth: usize = 0; // brace depth inside %r{
+            let mut in_percent_regex = in_multiline_percent_regex; // inside %r{...}
+            let mut percent_regex_depth: usize = multiline_percent_regex_depth; // brace depth inside %r{
             let mut j = 0;
             while j < line_bytes.len() {
                 let b = line_bytes[j];
@@ -262,8 +266,10 @@ impl Rule for SpaceAfterComma {
                 j += 1;
             }
 
-            // Persist regex state across lines (for multiline /regex/x literals).
+            // Persist regex state across lines (for multiline /regex/x and %r{} literals).
             in_multiline_regex = in_regex;
+            in_multiline_percent_regex = in_percent_regex;
+            multiline_percent_regex_depth = percent_regex_depth;
 
             // Detect if this line opens a heredoc (body starts on the next line)
             if in_heredoc.is_none() {

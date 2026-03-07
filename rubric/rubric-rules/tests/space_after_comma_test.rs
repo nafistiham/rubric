@@ -127,6 +127,22 @@ fn no_false_positive_for_comma_in_multiline_percent_w() {
     assert!(diags.is_empty(), "comma in multiline %w[] falsely flagged: {:?}", diags);
 }
 
+// -- False positive: commas inside multiline %r{...} regex bodies ─────────────
+// A `/` inside a %r{...} body must NOT be misdetected as starting a new regex,
+// otherwise commas in subsequent character classes (e.g. `[!$()*+,;=]`) get flagged.
+#[test]
+fn no_false_positive_for_comma_in_multiline_percent_r_body() {
+    let src = concat!(
+        "PAT = %r{\n",
+        "  (/path/to/file)?\n",   // `/` inside %r{} body — must NOT start a new regex
+        "  [!$()*+,;=]\n",        // comma inside character class — must NOT be flagged
+        "}iox\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAfterComma.check_source(&ctx);
+    assert!(diags.is_empty(), "comma in multiline percent-r body falsely flagged: {:?}", diags);
+}
+
 // -- False positive: commas inside heredoc bodies should not be flagged -------
 #[test]
 fn no_false_positive_for_comma_in_heredoc_body() {
