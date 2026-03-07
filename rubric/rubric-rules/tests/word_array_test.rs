@@ -30,3 +30,12 @@ fn no_false_positive_for_array_in_comment() {
     let diags = WordArray.check_source(&ctx);
     assert!(diags.is_empty(), "array in comment example falsely flagged: {:?}", diags);
 }
+
+// `["params", "args"]` inside a single-quoted JSON string must not be flagged
+#[test]
+fn no_false_positive_for_array_inside_string() {
+    let src = "job = '{\"args\":[\"params\", \"args\"]}'\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = WordArray.check_source(&ctx);
+    assert!(diags.is_empty(), "array inside string falsely flagged: {:?}", diags);
+}

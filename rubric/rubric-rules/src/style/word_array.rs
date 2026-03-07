@@ -19,8 +19,20 @@ impl Rule for WordArray {
             let bytes = line.as_bytes();
             let len = bytes.len();
             let mut j = 0;
+            let mut in_string: Option<u8> = None;
 
             while j < len {
+                // ── String state: skip characters inside string literals ──
+                match in_string {
+                    Some(_) if bytes[j] == b'\\' => { j += 2; continue; }
+                    Some(delim) if bytes[j] == delim => { in_string = None; j += 1; continue; }
+                    Some(_) => { j += 1; continue; }
+                    None if bytes[j] == b'"' || bytes[j] == b'\'' || bytes[j] == b'`' => {
+                        in_string = Some(bytes[j]); j += 1; continue;
+                    }
+                    None => {}
+                }
+
                 // Stop at start of inline comment
                 if bytes[j] == b'#' {
                     break;
