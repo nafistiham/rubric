@@ -9,20 +9,117 @@ impl Rule for RedundantSplatExpansion {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        let src = ctx.source;
+        let bytes = ctx.source.as_bytes();
+        let n = bytes.len();
+        let mut i = 0;
+        let mut in_string: Option<u8> = None;
+        let mut in_heredoc = false;
 
-        // Detect `*[` pattern (splat on array literal)
-        let mut search_start = 0usize;
-        while let Some(pos) = src[search_start..].find("*[") {
-            let abs_pos = search_start + pos;
-            diags.push(Diagnostic {
-                rule: self.name(),
-                message: "Redundant splat expansion on array literal `*[...]`.".into(),
-                range: TextRange::new(abs_pos as u32, (abs_pos + 2) as u32),
-                severity: Severity::Warning,
-            });
-            search_start = abs_pos + 2;
+        while i < n {
+            let b = bytes[i];
+
+            // Newline: check for heredoc terminator (simple: any non-indented all-caps word)
+            // Just reset heredoc tracking on blank lines as a simplification.
+            if b == b'\n' {
+                i += 1;
+                continue;
+            }
+
+            // ── String state ─────────────────────────────────────────────────
+            match in_string {
+                Some(_) if b == b'\\' => { i += 2; continue; }
+                Some(delim) if b == delim => { in_string = None; i += 1; continue; }
+                Some(_) => { i += 1; continue; }
+                None if b == b'"' || b == b'\'' || b == b'`' => {
+                    in_string = Some(b);
+                    i += 1;
+                    continue;
+                }
+                None if b == b'#' => {
+                    // Inline comment — skip to end of line
+                    while i < n && bytes[i] != b'\n' { i += 1; }
+                    continue;
+                }
+                None => {}
+            }
+
+            // Skip percent literals: %w[...], %r{...}, %(...), etc.
+            if b == b'%' && i + 1 < n {
+                let next = bytes[i + 1];
+                let (has_type, delim_offset) = match next {
+                    b'r' | b'w' | b'W' | b'i' | b'I' | b'q' | b'Q' | b'x' => (true, i + 2),
+                    b'(' | b'[' | b'{' | b'|' => (false, i + 1),
+                    _ => (false, usize::MAX),
+                };
+                if delim_offset < n {
+                    let open = bytes[delim_offset];
+                    let close = match open {
+                        b'(' => b')', b'[' => b']', b'{' => b'}', b'<' => b'>',
+                        _ => open,
+                    };
+                    let mut j = delim_offset + 1;
+                    if open == close {
+                        while j < n && bytes[j] != close { if bytes[j] == b'\\' { j += 2; } else { j += 1; } }
+                        if j < n { j += 1; }
+                    } else {
+                        let mut depth = 1usize;
+                        while j < n && depth > 0 {
+                            match bytes[j] {
+                                b'\\' => { j += 2; }
+                                c if c == open => { depth += 1; j += 1; }
+                                c if c == close => { depth -= 1; j += 1; }
+                                _ => { j += 1; }
+                            }
+                        }
+                    }
+                    i = j;
+                    let _ = has_type;
+                    continue;
+                }
+            }
+
+            // ── Detect `*[` ──────────────────────────────────────────────────
+            if b == b'*' && i + 1 < n && bytes[i + 1] == b'[' {
+                // Find the matching `]` for this `[`
+                let bracket_start = i + 1;
+                let mut j = bracket_start + 1;
+                let mut depth = 1usize;
+                while j < n && depth > 0 {
+                    match bytes[j] {
+                        b'\\' => { j += 2; }
+                        b'[' => { depth += 1; j += 1; }
+                        b']' => { depth -= 1; j += 1; }
+                        b'\n' => { break; } // Unclosed bracket — give up
+                        _ => { j += 1; }
+                    }
+                }
+
+                if depth == 0 {
+                    // `j` is now just past the closing `]`
+                    // Skip if followed by `.` — method call on array (not a plain literal)
+                    if j < n && bytes[j] == b'.' {
+                        i += 1;
+                        continue;
+                    }
+                    // Skip if followed by `[` — subscript access
+                    if j < n && bytes[j] == b'[' {
+                        i += 1;
+                        continue;
+                    }
+                    diags.push(Diagnostic {
+                        rule: self.name(),
+                        message: "Redundant splat expansion on array literal `*[...]`.".into(),
+                        range: TextRange::new(i as u32, (i + 2) as u32),
+                        severity: Severity::Warning,
+                    });
+                }
+                i += 1;
+                continue;
+            }
+
+            i += 1;
         }
+        let _ = in_heredoc;
 
         diags
     }
