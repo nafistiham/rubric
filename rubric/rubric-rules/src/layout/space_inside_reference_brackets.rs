@@ -70,14 +70,34 @@ impl Rule for SpaceInsideReferenceBrackets {
                     None => {}
                 }
 
+                // Skip %w[...], %W[...], %i[...], %I[...] — [ is the delimiter, not a reference bracket
+                if b == b'%' && pos + 2 < n && matches!(bytes[pos + 1], b'w' | b'W' | b'i' | b'I') && bytes[pos + 2] == b'[' {
+                    pos += 3;
+                    let mut depth = 1usize;
+                    while pos < n && depth > 0 {
+                        match bytes[pos] {
+                            b'\\' => { pos += 2; }
+                            b'[' => { depth += 1; pos += 1; }
+                            b']' => { depth -= 1; pos += 1; }
+                            _ => { pos += 1; }
+                        }
+                    }
+                    continue;
+                }
+
                 // Look for `[` followed by space (reference bracket, not array literal)
                 // Simple heuristic: `[` after a word character
                 if b == b'[' {
                     let prev = if pos > 0 { bytes[pos - 1] } else { 0 };
                     let next = if pos + 1 < n { bytes[pos + 1] } else { 0 };
                     // After a word char (indexing, not array literal)
+                    // Skip if preceded by % + letter (percent literal delimiter already handled above,
+                    // but catch bare %w[ if the prev check didn't skip it)
+                    let prev2 = if pos > 1 { bytes[pos - 2] } else { 0 };
+                    let is_percent_lit = prev2 == b'%' && matches!(prev, b'w' | b'W' | b'i' | b'I');
                     if (prev.is_ascii_alphanumeric() || prev == b'_' || prev == b')' || prev == b']')
                         && next == b' '
+                        && !is_percent_lit
                     {
                         let flag_pos = (line_start + pos + 1) as u32;
                         diags.push(Diagnostic {

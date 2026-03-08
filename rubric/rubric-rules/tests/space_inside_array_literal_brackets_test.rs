@@ -38,3 +38,12 @@ fn no_false_positive_for_space_in_regex_character_class() {
     let diags = SpaceInsideArrayLiteralBrackets.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations for regex char class with space, got: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_percent_w_bracket_literal() {
+    // %w[ foo bar ] uses [ as the delimiter, not an array bracket — spaces are not violations
+    let src = "words = %w[ foo bar bazz big small medium large ]\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideArrayLiteralBrackets.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for %w[ ] literal, got: {:?}", diags);
+}

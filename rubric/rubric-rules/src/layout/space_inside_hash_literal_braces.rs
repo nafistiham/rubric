@@ -70,9 +70,11 @@ impl Rule for SpaceInsideHashLiteralBraces {
                 }
 
                 // Skip %r{...}, %q{...}, %Q{...}, %w{...}, %W{...}, %i{...}, %I{...} etc.
+                // Also skip bare %{...} (equivalent to %Q{...})
                 let is_percent_lit = j + 1 < len && matches!(bytes[j + 1], b'r' | b'q' | b'Q' | b'w' | b'W' | b'i' | b'I' | b's' | b'x');
-                if b == b'%' && is_percent_lit {
-                    j += 2;
+                let is_bare_percent = j + 1 < len && bytes[j + 1] == b'{';
+                if b == b'%' && (is_percent_lit || is_bare_percent) {
+                    if is_bare_percent { j += 1; } else { j += 2; }
                     if j < len {
                         let delim = bytes[j];
                         j += 1;

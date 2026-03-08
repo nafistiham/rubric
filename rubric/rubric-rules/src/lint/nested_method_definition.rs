@@ -56,9 +56,13 @@ fn is_endless_method(t: &str) -> bool {
 /// the same line as the `def` — the line-by-line scanner would otherwise miss
 /// the closing `end` and leave a frame permanently on the stack.
 fn is_one_liner_def(t: &str) -> bool {
-    // Must contain "; end" somewhere after the def signature.
-    // Also accept the rare "; end " (end followed by a comment marker).
-    t.contains("; end") || t.contains(";end")
+    // "; end" pattern: `def foo; body; end`
+    if t.contains("; end") || t.contains(";end") {
+        return true;
+    }
+    // Any def line ending with ` end` — covers `def header; {} end`,
+    // `def encode(*) 'str' end`, `def body; "" end`, etc.
+    t.starts_with("def ") && (t.ends_with(" end") || t.ends_with("\tend"))
 }
 
 /// Returns `true` when the trimmed line opens a non-def block that requires a

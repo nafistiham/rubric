@@ -201,6 +201,30 @@ fn no_false_positive_for_def_inside_squiggly_heredoc() {
 }
 
 #[test]
+fn no_false_positive_for_one_liner_with_hash_body() {
+    // `def header; {} end` is a one-liner that returns an empty hash.
+    // Methods inside a class defined at module level must never be flagged.
+    let src = concat!(
+        "class Base\n",
+        "  class NullMail\n",
+        "    def body; \"\" end\n",
+        "    def header; {} end\n",
+        "    def respond_to?(str, incl = false)\n",
+        "      true\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NestedMethodDefinition.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "expected no violations for one-liner with hash body; got: {:?}",
+        diags
+    );
+}
+
+#[test]
 fn no_false_positive_for_def_inside_dash_heredoc() {
     // `def` appearing inside a <<-WORD heredoc (indented terminator) must not be flagged.
     let src = concat!(

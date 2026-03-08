@@ -65,6 +65,21 @@ impl Rule for SpaceInsideArrayLiteralBrackets {
                     None => {}
                 }
 
+                // Skip %w[...], %W[...], %i[...], %I[...] — [ is the delimiter, not an array bracket
+                if b == b'%' && j + 2 < len && matches!(bytes[j + 1], b'w' | b'W' | b'i' | b'I') && bytes[j + 2] == b'[' {
+                    j += 3; // skip %, letter, [
+                    let mut depth = 1usize;
+                    while j < len && depth > 0 {
+                        match bytes[j] {
+                            b'\\' => { j += 2; }
+                            b'[' => { depth += 1; j += 1; }
+                            b']' => { depth -= 1; j += 1; }
+                            _ => { j += 1; }
+                        }
+                    }
+                    continue;
+                }
+
                 // Detect `[ ` — open bracket followed by space (skip `[]` empty)
                 if b == b'[' {
                     if j + 1 < len && bytes[j+1] == b' ' {

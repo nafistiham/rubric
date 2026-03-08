@@ -35,3 +35,12 @@ fn no_false_positive_for_space_in_regex_character_class() {
     let diags = SpaceInsideReferenceBrackets.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations for regex char class with space, got: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_percent_w_bracket_literal() {
+    // %w[ foo bar ] uses [ as the delimiter — the `w` before `[` must not trigger the reference-bracket check
+    let src = "patterns = %w[ /lib/ bin/ exe/ ]\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideReferenceBrackets.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for %w[ ] literal, got: {:?}", diags);
+}

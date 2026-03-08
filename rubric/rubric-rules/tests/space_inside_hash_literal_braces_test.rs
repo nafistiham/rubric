@@ -85,3 +85,12 @@ fn no_false_positive_for_percent_q_string() {
     let diags = SpaceInsideHashLiteralBraces.check_source(&ctx);
     assert!(diags.is_empty(), "expected no violations for %q{{}} string, got: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_bare_percent_brace_literal() {
+    // %{...} is a bare percent string literal (equivalent to %Q{...}), not a hash literal
+    let src = "assert_dom_equal(%{<img src=\"http://example.com/img.png\" />}, mail.body.to_s.strip)\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceInsideHashLiteralBraces.check_source(&ctx);
+    assert!(diags.is_empty(), "expected no violations for bare %{{}} string, got: {:?}", diags);
+}
