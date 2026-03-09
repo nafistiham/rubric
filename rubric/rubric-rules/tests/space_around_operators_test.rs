@@ -434,3 +434,18 @@ fn no_false_positive_for_operator_in_string_interpolation() {
     let diags = SpaceAroundOperators.check_source(&ctx);
     assert!(diags.is_empty(), "- inside interpolated string must not be flagged: {:?}", diags);
 }
+
+#[test]
+fn no_false_positive_for_power_assign() {
+    // `x **= 2` is a correctly-spaced power-assign operator.
+    // The `=` must not be re-examined by the single-char `=` handler after
+    // the `**` handler advances j by 2, which would falsely flag it.
+    let src = "x **= 2\ny **= 3\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = SpaceAroundOperators.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "**= must not be flagged; got: {:?}",
+        diags
+    );
+}

@@ -292,7 +292,7 @@ impl Rule for SpaceAroundOperators {
                 if j + 1 < len {
                     let two = &bytes[j..j+2];
 
-                    // ** — exponentiation OR double-splat.
+                    // ** — exponentiation, double-splat, or **= (power-assign).
                     // It's a double-splat (**opts / **hash) when:
                     //   - the next char is an identifier char, AND
                     //   - the preceding char is NOT an identifier/digit/closing bracket
@@ -300,6 +300,13 @@ impl Rule for SpaceAroundOperators {
                     if two == b"**" {
                         let next_b = if j + 2 < len { bytes[j+2] } else { 0 };
                         let prev = if j > 0 { bytes[j-1] } else { 0 };
+                        // **= (power-assign): skip all three chars to avoid the `=`
+                        // being re-examined by the single-char `=` handler (which would
+                        // falsely flag it since `prev` would be `*`, not in the skip list).
+                        if next_b == b'=' {
+                            j += 3;
+                            continue;
+                        }
                         if (next_b.is_ascii_alphabetic() || next_b == b'_')
                             && !prev.is_ascii_alphanumeric() && prev != b')' && prev != b']'
                         {
