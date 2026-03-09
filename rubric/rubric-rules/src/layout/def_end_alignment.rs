@@ -69,6 +69,27 @@ fn is_one_liner(trimmed: &str) -> bool {
     trimmed.trim_end_matches(|c: char| c == ' ' || c == '\t').ends_with("; end")
 }
 
+/// Returns true when a non-def block opener and its matching `end` appear on
+/// the same line — e.g. `until cond; end`, `while x;end`, `foo do |x| end`.
+/// These must NOT push an inner-construct frame because the scanner never sees
+/// a standalone `end` line to pop it, leaving a phantom frame on the stack.
+fn is_one_liner_block(t: &str) -> bool {
+    t.contains("; end") || t.contains(";end")
+        || t.ends_with(" end") || t.ends_with("\tend")
+}
+
+/// Returns true if the line has ` do` immediately before an inline comment,
+/// e.g. `foo do # :nodoc:` or `items.each do # process`.
+fn has_do_before_comment(t: &str) -> bool {
+    if let Some(pos) = t.find(" do ") {
+        let after = t[pos + 4..].trim_start();
+        if after.is_empty() || after.starts_with('#') {
+            return true;
+        }
+    }
+    false
+}
+
 impl Rule for DefEndAlignment {
     fn name(&self) -> &'static str {
         "Layout/DefEndAlignment"
@@ -123,7 +144,7 @@ impl Rule for DefEndAlignment {
                 || t.starts_with("class ") || t.starts_with("module ")
             );
 
-            let is_inner_construct = !is_continuation && !is_def_opener && !is_one_liner(t) && (
+            let is_inner_construct = !is_continuation && !is_def_opener && !is_one_liner_block(t) && (
                 t.starts_with("if ")
                 || t.starts_with("unless ")
                 || t.starts_with("while ")
@@ -135,6 +156,7 @@ impl Rule for DefEndAlignment {
                 || t.contains(" do |")
                 || t.contains(" do|")
                 || t == "do"
+                || has_do_before_comment(t)
             );
 
             // Inline conditional/begin assignment: `x = if cond` / `x ||= if` / `x = begin` / etc.

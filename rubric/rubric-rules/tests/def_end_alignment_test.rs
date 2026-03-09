@@ -418,3 +418,69 @@ fn no_false_positive_for_private_class_method_def() {
         diags
     );
 }
+
+// ── False positive: `do` block with trailing inline comment ───────────────────
+// `foo do # :nodoc:` — the `do` is missed by `ends_with(" do")`, causing the
+// do-block's `end` to pop the def frame instead of the do frame.
+#[test]
+fn no_false_positive_for_do_block_with_trailing_comment() {
+    let src = concat!(
+        "module MyEngine\n",
+        "  def setup\n",
+        "    ActiveSupport.on_load(:action_controller) do # :nodoc:\n",
+        "      include Helper\n",
+        "    end\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "do-block with trailing comment must not corrupt frame stack; got: {:?}",
+        diags
+    );
+}
+
+// ── False positive: one-liner keyword block `;end` (no space) ─────────────────
+// `until x;end` — not caught by is_one_liner which only matches `"; end"`.
+#[test]
+fn no_false_positive_for_one_liner_keyword_block_no_space() {
+    let src = concat!(
+        "def outer\n",
+        "  until scanner.eos?;end\n",
+        "end\n",
+        "\n",
+        "def other\n",
+        "  1\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "one-liner keyword block with ;end must not leave phantom frame; got: {:?}",
+        diags
+    );
+}
+
+// ── False positive: one-liner do-block ending with ` end` ─────────────────────
+#[test]
+fn no_false_positive_for_one_liner_do_block_space_end() {
+    let src = concat!(
+        "def outer\n",
+        "  items.each do |x| process(x) end\n",
+        "end\n",
+        "\n",
+        "def other\n",
+        "  2\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DefEndAlignment.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "one-liner do-block ending with ' end' must not leave phantom frame; got: {:?}",
+        diags
+    );
+}
