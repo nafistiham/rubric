@@ -65,6 +65,16 @@ fn is_one_liner_def(t: &str) -> bool {
     t.starts_with("def ") && (t.ends_with(" end") || t.ends_with("\tend"))
 }
 
+/// Returns `true` when the trimmed line is a one-liner non-def block whose
+/// opening keyword and closing `end` appear on the same line, e.g.
+/// `until token = scan || @scanner.eos?; end` or `while true; break; end`.
+///
+/// These must NOT push a frame because the line-by-line scanner would never
+/// see a standalone `end` line to pop them, leaving a phantom frame.
+fn is_one_liner_block(t: &str) -> bool {
+    t.contains("; end") || t.contains(";end") || t.ends_with(" end") || t.ends_with("\tend")
+}
+
 /// Returns `true` when the trimmed line opens a non-def block that requires a
 /// matching `end`: do-blocks, class, module, if, unless, while, until, for,
 /// case, begin.
@@ -236,7 +246,7 @@ impl Rule for NestedMethodDefinition {
                 // The word-boundary check (not alphanumeric, not _, not :) prevents
                 // `endless` / `end:` from being treated as `end` tokens.
                 stack.pop();
-            } else if opens_other_block(t) {
+            } else if opens_other_block(t) && !is_one_liner_block(t) {
                 stack.push(FrameKind::Other);
             }
         }

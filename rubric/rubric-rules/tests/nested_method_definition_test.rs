@@ -224,6 +224,112 @@ fn no_false_positive_for_one_liner_with_hash_body() {
     );
 }
 
+// One-liner keyword block false-positive tests
+
+#[test]
+fn no_false_positive_for_until_one_liner_inside_def() {
+    // `until ...; end` is a one-liner — must not push a phantom frame.
+    // The `def` following the outer def must NOT be flagged as nested.
+    let src = concat!(
+        "def outer\n",
+        "  until token = scan || @scanner.eos?; end\n",
+        "  do_work\n",
+        "end\n",
+        "\n",
+        "def other_method\n",
+        "  1\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NestedMethodDefinition.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "until one-liner must not leave phantom frame; got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_false_positive_for_while_one_liner_inside_def() {
+    let src = concat!(
+        "def outer\n",
+        "  while condition; break; end\n",
+        "end\n",
+        "\n",
+        "def other_method\n",
+        "  2\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NestedMethodDefinition.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "while one-liner must not leave phantom frame; got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_false_positive_for_for_one_liner_inside_def() {
+    let src = concat!(
+        "def outer\n",
+        "  for x in collection; process(x); end\n",
+        "end\n",
+        "\n",
+        "def other_method\n",
+        "  3\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NestedMethodDefinition.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "for one-liner must not leave phantom frame; got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn no_false_positive_for_if_one_liner_inside_def() {
+    let src = concat!(
+        "def outer\n",
+        "  if condition; do_thing; end\n",
+        "end\n",
+        "\n",
+        "def other_method\n",
+        "  4\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NestedMethodDefinition.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "if one-liner must not leave phantom frame; got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn still_detects_nested_def_with_multi_line_until() {
+    // A real multi-line `until` block inside a def must still count.
+    // A `def` inside that `until` block is NOT directly inside a `Def` frame,
+    // so it should NOT be flagged (top frame is Other).
+    let src = concat!(
+        "def outer\n",
+        "  until done?\n",
+        "    x = 1\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = NestedMethodDefinition.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "multi-line until inside def should not flag; got: {:?}",
+        diags
+    );
+}
+
 #[test]
 fn no_false_positive_for_def_inside_dash_heredoc() {
     // `def` appearing inside a <<-WORD heredoc (indented terminator) must not be flagged.
