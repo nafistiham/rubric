@@ -215,6 +215,91 @@ fn detects_real_duplicate_at_file_scope() {
     );
 }
 
+/// `end` as a word inside a string literal must not corrupt the frame stack.
+#[test]
+fn no_fp_end_word_in_string_literal() {
+    // `"unexpected end of input"` contains `end` as a word — count_ends must not
+    // count it, otherwise the def frame is popped early and subsequent methods
+    // leak into the wrong scope.
+    let src = concat!(
+        "class Parser\n",
+        "  def tokenize(input)\n",
+        "    raise \"unexpected end of input\" if input.empty?\n",
+        "    input.chars\n",
+        "  end\n",
+        "\n",
+        "  def parse(tokens)\n",
+        "    tokens.first\n",
+        "  end\n",
+        "end\n",
+        "\n",
+        "class Lexer\n",
+        "  def parse(src)\n",
+        "    src\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DuplicateMethods.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "end in string must not corrupt frame stack; got: {:?}",
+        diags
+    );
+}
+
+/// `end` appearing after a `#` inline comment must not be counted.
+#[test]
+fn no_fp_end_word_in_inline_comment() {
+    let src = concat!(
+        "class Foo\n",
+        "  def bar\n",
+        "    do_thing # this is the end of the process\n",
+        "  end\n",
+        "end\n",
+        "\n",
+        "class Baz\n",
+        "  def bar\n",
+        "    other\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DuplicateMethods.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "end in comment must not corrupt frame stack; got: {:?}",
+        diags
+    );
+}
+
+/// `do` blocks with trailing inline comments must be detected as block openers.
+#[test]
+fn no_fp_do_block_with_trailing_comment() {
+    // `on_load(:x) do # :nodoc:` — the `do` is missed if we only check `ends_with(" do")`.
+    // Without the frame push, the `end` closing the block pops the wrong frame.
+    let src = concat!(
+        "module MyEngine\n",
+        "  ActiveSupport.on_load(:action_controller) do # :nodoc:\n",
+        "    def helper\n",
+        "      true\n",
+        "    end\n",
+        "  end\n",
+        "\n",
+        "  def helper\n",
+        "    false\n",
+        "  end\n",
+        "end\n",
+    );
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = DuplicateMethods.check_source(&ctx);
+    assert!(
+        diags.is_empty(),
+        "def inside do-block-with-comment must not conflict with outer def; got: {:?}",
+        diags
+    );
+}
+
 /// Three-level nesting: methods in the innermost class must not conflict with
 /// methods in middle or outer classes.
 #[test]

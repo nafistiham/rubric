@@ -3,7 +3,12 @@ use std::collections::HashMap;
 
 pub struct DuplicateMethods;
 
-/// Count word-boundary `end` tokens on the line.
+/// Count word-boundary `end` tokens on the line, skipping string literal
+/// contents and stopping at inline `#` comments.
+///
+/// Without this, `end` as a word inside a string (e.g. `"unexpected end of
+/// input"`, `"at the end of the day"`) or after a `#` (e.g. `end # end here`)
+/// is miscounted, corrupting the frame stack and causing false positives.
 fn count_ends(line: &str) -> i64 {
     if line.trim_start().starts_with('#') {
         return 0;
@@ -12,21 +17,62 @@ fn count_ends(line: &str) -> i64 {
     let n = bytes.len();
     let mut count = 0i64;
     let mut i = 0usize;
-    while i + 2 < n {
-        if &bytes[i..i + 3] == b"end" {
-            let before_ok =
-                i == 0 || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
-            let after_ok =
-                i + 3 >= n || (!bytes[i + 3].is_ascii_alphanumeric() && bytes[i + 3] != b'_');
-            if before_ok && after_ok {
-                count += 1;
+    let mut in_string: Option<u8> = None; // Some(b'"') or Some(b'\'')
+
+    while i < n {
+        let b = bytes[i];
+        match in_string {
+            Some(q) => {
+                if b == b'\\' && i + 1 < n {
+                    // Skip escaped character (handles \', \", \\, etc.)
+                    i += 2;
+                } else if b == q {
+                    in_string = None;
+                    i += 1;
+                } else {
+                    i += 1;
+                }
             }
-            i += 3;
-        } else {
-            i += 1;
+            None => {
+                if b == b'#' {
+                    // Rest of line is an inline comment — stop counting.
+                    break;
+                }
+                if b == b'"' || b == b'\'' {
+                    in_string = Some(b);
+                    i += 1;
+                    continue;
+                }
+                if i + 2 < n && &bytes[i..i + 3] == b"end" {
+                    let before_ok = i == 0
+                        || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
+                    let after_ok = i + 3 >= n
+                        || (!bytes[i + 3].is_ascii_alphanumeric() && bytes[i + 3] != b'_');
+                    if before_ok && after_ok {
+                        count += 1;
+                    }
+                    i += 3;
+                } else {
+                    i += 1;
+                }
+            }
         }
     }
     count
+}
+
+/// Returns `true` if the line has ` do` immediately before an inline comment,
+/// e.g. `ActiveSupport.on_load(:action_controller) do # :nodoc:`.
+/// This catches do-block openers that `t.ends_with(" do")` misses.
+fn has_do_before_comment(t: &str) -> bool {
+    // Look for ` do ` where the rest (after trimming) is a `#` comment.
+    if let Some(pos) = t.find(" do ") {
+        let after = t[pos + 4..].trim_start();
+        if after.is_empty() || after.starts_with('#') {
+            return true;
+        }
+    }
+    false
 }
 
 /// Classify a fully-trimmed line.
@@ -50,10 +96,12 @@ fn classify_opener(t: &str) -> (bool, bool) {
     }
 
     // `do` block — isolating (RSpec, Thread.new, Class.new, etc.)
+    // Also handle trailing inline comments: `foo do # :nodoc:` or `foo do # comment`.
     if t == "do"
         || t.ends_with(" do")
         || t.contains(" do |")
         || t.contains(" do\t")
+        || has_do_before_comment(t)
     {
         return (true, true);
     }
