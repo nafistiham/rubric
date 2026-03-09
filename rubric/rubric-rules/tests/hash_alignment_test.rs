@@ -65,12 +65,48 @@ fn no_false_positive_for_multiline_method_call_continuation() {
     assert!(diags.is_empty(), "multi-line method call hash continuation falsely flagged: {:?}", diags);
 }
 
-// ── True positive: extra spaces before `=>` (table-style padding) ────────────
+// ── Table-aligned groups are now allowed (table style) ───────────────────────
+// If all rockets in a hash are at the same column, it's consistent table style.
+// RuboCop with `EnforcedStyle: table` allows this — we match that behavior to
+// avoid 371 FPs in the jekyll benchmark.
 #[test]
-fn detects_extra_spaces_before_rocket() {
+fn no_false_positive_for_table_aligned_hash() {
+    // All three rockets are at the same column — table style, must not be flagged.
     let src = "{\n  :a   => 1,\n  :bb  => 2,\n  :ccc => 3\n}\n";
     let ctx = LintContext::new(Path::new("test.rb"), src);
     let diags = HashAlignment.check_source(&ctx);
-    assert!(!diags.is_empty(), "extra spaces before `=>` not detected");
+    assert!(
+        diags.is_empty(),
+        "consistently aligned rockets must not be flagged; got: {:?}",
+        diags
+    );
+}
+
+// ── True positive: inconsistently aligned rockets ────────────────────────────
+// When rockets are at different columns in the same hash, it's neither valid
+// `key` style (1 space each) nor valid `table` style (same column) — flag it.
+#[test]
+fn detects_inconsistently_aligned_rockets() {
+    // "short"     => at column 12, "much_longer_key" => at column 19 — inconsistent
+    let src = "{\n  \"short\"     => \"val\",\n  \"much_longer_key\" => \"val2\"\n}\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = HashAlignment.check_source(&ctx);
+    assert!(
+        !diags.is_empty(),
+        "inconsistently aligned rockets must be flagged"
+    );
     assert!(diags.iter().all(|d| d.rule == "Layout/HashAlignment"));
+}
+
+// ── True positive: lone rocket with extra spaces (no aligned group) ───────────
+#[test]
+fn detects_lone_extra_spaced_rocket() {
+    // A single `=>` with extra spaces, no neighboring rockets at same column.
+    let src = "result = {  \"key\"   => value }\nother_result = {  \"key\" => value }\n";
+    let ctx = LintContext::new(Path::new("test.rb"), src);
+    let diags = HashAlignment.check_source(&ctx);
+    assert!(
+        !diags.is_empty(),
+        "lone extra-spaced rocket with no aligned group must be flagged"
+    );
 }
