@@ -2,6 +2,26 @@ use rubric_core::{Diagnostic, Fix, FixSafety, LintContext, Rule, Severity, TextE
 
 pub struct SpaceInsideHashLiteralBraces;
 
+fn heredoc_terminator_sihlb(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i + 1 < len {
+        if bytes[i] == b'<' && bytes[i + 1] == b'<' {
+            let mut j = i + 2;
+            if j < len && (bytes[j] == b'-' || bytes[j] == b'~') { j += 1; }
+            if j < len && matches!(bytes[j], b'\'' | b'"' | b'`') { j += 1; }
+            let start = j;
+            while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') { j += 1; }
+            if j > start {
+                return Some(line[start..j].to_string());
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 impl Rule for SpaceInsideHashLiteralBraces {
     fn name(&self) -> &'static str {
         "Layout/SpaceInsideHashLiteralBraces"
@@ -13,11 +33,25 @@ impl Rule for SpaceInsideHashLiteralBraces {
         let mut in_multiline_regex = false;
         let mut in_percent_regex = false;
         let mut percent_regex_depth = 0usize;
+        let mut in_heredoc: Option<String> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             let bytes = line.as_bytes();
             let len = bytes.len();
             let line_start = ctx.line_start_offsets[i] as usize;
+
+            // Skip heredoc body lines
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim() == term.as_str() {
+                    in_heredoc = None;
+                }
+                continue;
+            }
+            // Detect heredoc opener (body starts on next line)
+            if let Some(term) = heredoc_terminator_sihlb(line) {
+                in_heredoc = Some(term);
+                // Fall through: the opener line itself is real Ruby
+            }
 
             // --- Multiline /regex/ body ---
             if in_multiline_regex {
@@ -194,5 +228,51 @@ impl Rule for SpaceInsideHashLiteralBraces {
             }],
             safety: FixSafety::Safe,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rubric_core::LintContext;
+    use std::path::Path;
+
+    fn check(src: &str) -> Vec<String> {
+        let ctx = LintContext::new(Path::new("test.rb"), src);
+        SpaceInsideHashLiteralBraces.check_source(&ctx)
+            .into_iter()
+            .map(|d| d.message)
+            .collect()
+    }
+
+    // Regression: CSS/HTML inside a heredoc contained `{margin: 0}` etc. which
+    // was previously scanned as Ruby, producing false-positive hash-brace warnings.
+    #[test]
+    fn test_heredoc_body_not_scanned() {
+        let src = concat!(
+            "html = <<-HTML\n",
+            "  <style>body {margin: 0; padding: 0;}</style>\n",
+            "HTML\n",
+        );
+        assert!(check(src).is_empty(), "heredoc body must not be scanned for hash braces");
+    }
+
+    // Regression: squiggly heredoc (<<~) also skipped.
+    #[test]
+    fn test_squiggly_heredoc_body_not_scanned() {
+        let src = concat!(
+            "css = <<~CSS\n",
+            "  .foo {color: red;}\n",
+            "CSS\n",
+        );
+        assert!(check(src).is_empty(), "<<~ heredoc body must not be scanned");
+    }
+
+    // Sanity: genuine missing-space hash on real Ruby line still flagged.
+    #[test]
+    fn test_real_hash_missing_space_still_flagged() {
+        let src = "h = {a: 1}\n";
+        let diags = check(src);
+        assert!(!diags.is_empty(), "missing space after {{ should still be flagged");
     }
 }

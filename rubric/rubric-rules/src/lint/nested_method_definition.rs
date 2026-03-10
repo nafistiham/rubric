@@ -72,7 +72,8 @@ fn is_one_liner_def(t: &str) -> bool {
 /// These must NOT push a frame because the line-by-line scanner would never
 /// see a standalone `end` line to pop them, leaving a phantom frame.
 fn is_one_liner_block(t: &str) -> bool {
-    t.contains("; end") || t.contains(";end") || t.ends_with(" end") || t.ends_with("\tend")
+    let t = t.trim_end_matches(|c: char| c == ' ' || c == '\t');
+    t.ends_with("; end") || t.ends_with(";end") || t.ends_with(" end") || t.ends_with("\tend")
 }
 
 /// Returns `true` when the trimmed line opens a non-def block that requires a
