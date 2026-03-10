@@ -32,10 +32,25 @@ fn is_endless_method(trimmed: &str) -> bool {
     false
 }
 
-/// Returns true if `trimmed` is a one-liner like `class Foo; end` or `def foo; bar; end`.
-/// These should not be pushed onto the stack because their `end` is on the same line.
+/// Returns true if `trimmed` is a one-liner — its opener and closer are on the same line.
+/// Patterns:
+///   - `class Foo; end` / `def foo; bar; end`      → ends with `; end`
+///   - `def decode(*) { foo: "decoded" } end`      → ends with ` end` (no semicolon, body in braces)
+///   - `class ::News; def self.has_many(*); end end`→ ends with ` end` and contains `; end`
+/// All these should NOT be pushed onto the stack because their `end` is on the same line.
 fn is_one_liner(trimmed: &str) -> bool {
-    trimmed.trim_end_matches(|c: char| c == ' ' || c == '\t').ends_with("; end")
+    let bare = trimmed.trim_end_matches(|c: char| c == ' ' || c == '\t');
+    // Standard one-liner: `def foo; bar; end` / `class Foo; end`
+    if bare.ends_with("; end") {
+        return true;
+    }
+    // One-liner where body doesn't use semicolons: `def foo(*) { hash } end`
+    // or nested: `class Foo; def bar; end end`
+    // Any line that ends with ` end` (space before end) and has content before it.
+    if bare.ends_with(" end") && bare.len() > 4 {
+        return true;
+    }
+    false
 }
 
 /// Extracts the heredoc terminator word from a line containing `<<`, `<<-`, or `<<~`.
@@ -105,8 +120,8 @@ fn is_end_token(trimmed: &str) -> bool {
 /// These patterns open a multi-line `if/unless/case/begin` block mid-line whose
 /// `end` alignment is NOT checked by Layout/EndAlignment (rubocop skips inline ends).
 fn has_inline_block_opener(trimmed: &str) -> bool {
-    // Check for `= if`, `= unless`, `= case` (with one or more spaces)
-    for kw in &["if", "unless", "case"] {
+    // Check for `= if`, `= unless`, `= case`, `= while`, `= until` (with one or more spaces)
+    for kw in &["if", "unless", "case", "while", "until"] {
         if contains_assign_kw(trimmed, kw) {
             return true;
         }
@@ -131,6 +146,16 @@ fn has_inline_block_opener(trimmed: &str) -> bool {
             return true;
         }
     }
+    // `!! case expr`, `! case expr` — boolean coercion of a case expression.
+    // `return case expr` — case expression returned from a method.
+    // These open an inline case block whose `end` alignment is not checked.
+    if trimmed.contains("!! case") || trimmed.contains("! case ") {
+        return true;
+    }
+    if trimmed.contains("return case ") || trimmed.ends_with("return case") {
+        return true;
+    }
+
     // Arithmetic and logical operators before if/unless/case:
     // e.g., `acc + if cond`, `val | if cond`, `x || if cond`, `x && if cond`
     // We look for these specific operator patterns followed by the keyword with a word boundary.
@@ -260,17 +285,23 @@ impl Rule for EndAlignment {
                 || trimmed.ends_with(" do")
                 || trimmed.contains(" do |")
                 || trimmed.contains(" do|")
+                // `method do # trailing comment` — do followed by a comment
+                || trimmed.contains(" do #")
+                // `method do; body` — do followed by semicolon (inline body)
+                || trimmed.contains(" do;")
             );
 
             let is_keyword_opener = !is_continuation && !is_one_liner(trimmed) && !is_endless_method(trimmed) && !is_do_block && (
                 trimmed.starts_with("def ") || trimmed == "def"
                 || trimmed.starts_with("private def ") || trimmed.starts_with("protected def ")
                 || trimmed.starts_with("private_class_method def ") || trimmed.starts_with("public_class_method def ")
+                || trimmed.starts_with("module_function def ")
                 || trimmed.starts_with("class ") || trimmed.starts_with("module ")
                 || trimmed.starts_with("if ") || trimmed.starts_with("unless ")
                 || trimmed.starts_with("while ") || trimmed.starts_with("until ")
                 || trimmed.starts_with("for ") || trimmed == "begin"
                 || trimmed.starts_with("begin ") || trimmed.starts_with("case ")
+                || trimmed == "case"  // bare caseless case expression
             );
 
             // Detect inline if/unless/case/begin assignments that open a block mid-line
@@ -278,13 +309,36 @@ impl Rule for EndAlignment {
             // Also: arithmetic/logical operators before if/unless/case (e.g., `acc + if cond`)
             let is_inline_opener = !is_continuation && !is_keyword_opener && !is_do_block && has_inline_block_opener(trimmed);
 
+            // When the previous line ends with `\` (backslash continuation) and the current
+            // line opens a keyword block or do-block, track it as an inline opener (check=false).
+            // E.g.:
+            //   `options = \` + `  case last`      — inline case expression
+            //   `test "very long name" \` + `"cont" do` — multi-line method call with do-block
+            // Rubocop does not check end alignment for these because the block is part of a
+            // wrapped expression.
+            // When the previous line ends with `\` (backslash continuation) and the current
+            // line opens a NEW block that needs a matching `end`, track it as check=false.
+            //
+            // NOTE: `if`/`unless` are NOT included here because on continuation lines they
+            // act as trailing modifiers (e.g., `raise 'error' \` + `unless cond`), not as
+            // block openers. Only `case`, `begin`, and `do`-blocks can unambiguously open a
+            // new block on a continuation line.
+            let is_continuation_keyword = is_continuation && !is_one_liner(trimmed) && (
+                trimmed.starts_with("case ") || trimmed == "case"
+                || trimmed == "begin" || trimmed.starts_with("begin ")
+                // Continuation line ending with `do` — method call split across lines with `\`
+                || trimmed.ends_with(" do")
+                || trimmed.contains(" do |") || trimmed.contains(" do|")
+                || trimmed.contains(" do #") || trimmed.contains(" do;")
+            );
+
             if is_keyword_opener {
                 stack.push((indent, true));
             } else if is_do_block {
                 // Push with check=false: we track the frame for correct end-consumption,
                 // but do NOT flag misaligned ends.
                 stack.push((indent, false));
-            } else if is_inline_opener {
+            } else if is_inline_opener || is_continuation_keyword {
                 stack.push((indent, false));
             }
 

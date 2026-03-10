@@ -269,6 +269,15 @@ impl Rule for SpaceAroundOperators {
                             j += 3;
                             continue;
                         }
+                        // Skip operator method definitions: `def ===(other)`, `def <=>(other)`,
+                        // `private def ===(other)`, etc. The operator is the method name.
+                        {
+                            let before = line[..j].trim_end();
+                            if before.ends_with("def") {
+                                j += 3;
+                                continue;
+                            }
+                        }
                         let prev_ok = j == 0 || bytes[j-1] == b' ' || bytes[j-1] == b'\t';
                         let next_ok = j + 3 >= len || bytes[j+3] == b' ' || bytes[j+3] == b'\t';
                         if !prev_ok || !next_ok {

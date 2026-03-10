@@ -149,6 +149,9 @@ impl Rule for IndentationWidth {
                 || l.contains(" = unless ") || l.contains("||= unless ") || l.contains("&&= unless ")
                 || l.contains(" = case ")   || l.contains("||= case ")   || l.contains("&&= case ")
                 || l.contains(" << if ")   || l.contains(" << unless ") || l.contains(" << case ")
+                || l.contains("!! case ") || l.contains("! case ")  // boolean-coerced case
+                || l.contains(" || if ") || l.contains(" || unless ") || l.contains(" || case ")
+                || l.contains(" && if ") || l.contains(" && unless ") || l.contains(" && case ")
                 {
                     inline_cond_depth += 1;
                 }
@@ -181,7 +184,9 @@ impl Rule for IndentationWidth {
                 // the current line is a continuation of the expression and may be
                 // aligned to the operand on the first line.
                 let is_boolean_continuation = prev_code.ends_with("&&")
-                    || prev_code.ends_with("||");
+                    || prev_code.ends_with("||")
+                    || prev_code.ends_with("||=")
+                    || prev_code.ends_with("&&=");
                 // Skip when previous line ends with an arithmetic/string operator that
                 // signals a multi-line expression continuation (alignment to operand).
                 let is_operator_continuation = prev_code.ends_with(" +")
@@ -197,20 +202,43 @@ impl Rule for IndentationWidth {
                 let trimmed_line = line.trim_start();
                 let is_method_chain = trimmed_line.starts_with('.');
 
+                // Skip lines immediately following branch keywords (else/elsif/rescue/ensure/when).
+                // These lines are indented relative to the branch keyword's alignment position
+                // (which may itself be at an odd indent inside an inline conditional).
+                let prev_trimmed_start = prev_nonempty_line.trim_start();
+                let is_after_branch_keyword = prev_trimmed_start.starts_with("else")
+                    || prev_trimmed_start.starts_with("elsif ")
+                    || prev_trimmed_start.starts_with("rescue")
+                    || prev_trimmed_start.starts_with("ensure")
+                    || prev_trimmed_start.starts_with("when ");
+
                 // Skip closing tokens — they align with their opener, which may be odd-indented.
                 let is_end_keyword = trimmed_line == "end"
                     || trimmed_line.starts_with("end ")
                     || trimmed_line.starts_with("end.")
                     || trimmed_line.starts_with("end\n");
+                // Skip branch keywords: elsif/else/rescue/ensure/when align with their parent
+                // construct (if/begin/case), not with a 2-space increment. IndentationWidth
+                // does not govern their alignment — ElseAlignment/CaseIndentation do.
+                let is_branch_keyword = trimmed_line.starts_with("elsif ")
+                    || trimmed_line == "elsif"
+                    || trimmed_line == "else"
+                    || trimmed_line.starts_with("else ")  // `else # comment`
+                    || trimmed_line == "rescue"
+                    || trimmed_line.starts_with("rescue ")
+                    || trimmed_line == "ensure"
+                    || trimmed_line.starts_with("ensure ")
+                    || trimmed_line.starts_with("when ");
                 let is_closing_token = is_end_keyword
                     || trimmed_line.starts_with(']')
                     || trimmed_line.starts_with(')')
-                    || trimmed_line.starts_with('}');
+                    || trimmed_line.starts_with('}')
+                    || is_branch_keyword;
 
                 if !is_comma_continuation && !is_bracket_continuation
                     && !is_backslash_continuation && !is_boolean_continuation
                     && !is_operator_continuation
-                    && !is_method_chain
+                    && !is_method_chain && !is_after_branch_keyword
                     && !is_closing_token && inline_cond_depth == 0
                     && entering_depth == 0  // skip lines inside bracket expressions
                 {
