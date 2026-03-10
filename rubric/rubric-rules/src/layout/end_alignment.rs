@@ -247,36 +247,27 @@ fn contains_assign_kw(trimmed: &str, kw: &str) -> bool {
 }
 
 /// Returns true if `trimmed` contains a `do` block pattern (` do |`, ` do|`, ` do #`,
-/// ` do;`) **outside** of a string literal. This prevents lines like
-/// `puts ", force: :cascade do |t|"` from being mis-detected as do-block openers.
+/// ` do;`) that is **not** inside a string literal ending on the same line.
+///
+/// Strategy: find the last occurrence of each pattern, then check if the
+/// remainder of the line (after the pattern) ends with a closing string
+/// delimiter `"` or `'` — if it does, the pattern is inside a string argument.
+/// This handles cases like `puts "cascade do |t|"` (inside string, skip) vs
+/// `.gsub(/regex/) do |match|` (outside string, detect).
 fn has_do_pattern_outside_string(trimmed: &str) -> bool {
-    let bytes = trimmed.as_bytes();
-    let n = bytes.len();
-    let mut in_str: Option<u8> = None;
-    let mut i = 0;
-    while i < n {
-        match in_str {
-            Some(_) if bytes[i] == b'\\' => { i += 2; continue; }
-            Some(d) if bytes[i] == d => { in_str = None; i += 1; continue; }
-            Some(_) => { i += 1; continue; }
-            None if bytes[i] == b'\'' || bytes[i] == b'"' => {
-                in_str = Some(bytes[i]); i += 1; continue;
+    for pattern in &[" do |", " do|", " do #", " do;"] {
+        if let Some(pos) = trimmed.rfind(pattern) {
+            let after = &trimmed[pos + pattern.len()..];
+            // Strip any trailing inline comment from the remainder
+            let code_after = strip_inline_comment_for_one_liner(after);
+            let bare_after = code_after.trim_end();
+            // If everything after the `do` pattern up to EOL closes with a
+            // string quote, the pattern is embedded in a string argument.
+            if bare_after.ends_with('"') || bare_after.ends_with('\'') {
+                continue;
             }
-            None if bytes[i] == b'#' => break,
-            None => {}
+            return true;
         }
-        // Check for " do" followed by ` |`, `|`, ` #`, `;`
-        if bytes[i] == b' ' && i + 3 <= n && bytes[i + 1] == b'd' && bytes[i + 2] == b'o' {
-            let after = i + 3;
-            if after < n && matches!(bytes[after], b' ' | b'|' | b'#' | b';') {
-                return true;
-            }
-            // ` do|` — pipe immediately after `do` without space
-            if after < n && bytes[after] == b'|' {
-                return true;
-            }
-        }
-        i += 1;
     }
     false
 }
