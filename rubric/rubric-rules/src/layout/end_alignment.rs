@@ -39,7 +39,11 @@ fn is_endless_method(trimmed: &str) -> bool {
 ///   - `class ::News; def self.has_many(*); end end`→ ends with ` end` and contains `; end`
 /// All these should NOT be pushed onto the stack because their `end` is on the same line.
 fn is_one_liner(trimmed: &str) -> bool {
-    let bare = trimmed.trim_end_matches(|c: char| c == ' ' || c == '\t');
+    // Strip a trailing inline comment (`# ...`) before checking for `end`.
+    // This handles `def foo() end # :nodoc:` — without stripping, the line
+    // appears to end with `# :nodoc:` rather than ` end`.
+    let code_part = strip_inline_comment_for_one_liner(trimmed);
+    let bare = code_part.trim_end_matches(|c: char| c == ' ' || c == '\t');
     // Standard one-liner: `def foo; bar; end` / `class Foo; end`
     if bare.ends_with("; end") {
         return true;
@@ -51,6 +55,26 @@ fn is_one_liner(trimmed: &str) -> bool {
         return true;
     }
     false
+}
+
+/// Strip a trailing inline comment from a line (simplified: finds the first
+/// bare `#` not inside a string literal).
+fn strip_inline_comment_for_one_liner(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    let mut in_str: Option<u8> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        match in_str {
+            Some(_) if bytes[i] == b'\\' => { i += 2; continue; }
+            Some(d) if bytes[i] == d => { in_str = None; }
+            Some(_) => {}
+            None if bytes[i] == b'\'' || bytes[i] == b'"' => { in_str = Some(bytes[i]); }
+            None if bytes[i] == b'#' => return &s[..i],
+            None => {}
+        }
+        i += 1;
+    }
+    s
 }
 
 /// Extracts the heredoc terminator word from a line containing `<<`, `<<-`, or `<<~`.
@@ -126,12 +150,26 @@ fn has_inline_block_opener(trimmed: &str) -> bool {
             return true;
         }
     }
-    // `= begin` at end of line or followed by space
-    if trimmed.contains("= begin") || trimmed.contains("|| begin") || trimmed.contains("&& begin") {
-        return true;
+    // `= begin` / `|| begin` / `&& begin` at end of line or followed by a space
+    // but NOT `= begin_something` (method name starting with "begin").
+    for prefix in &["= begin", "|| begin", "&& begin"] {
+        if let Some(pos) = trimmed.find(prefix) {
+            let after = &trimmed[pos + prefix.len()..];
+            // Word-boundary: must be followed by space, EOL, or `#` (comment)
+            if after.is_empty() || after.starts_with(' ') || after.starts_with('#') {
+                return true;
+            }
+        }
     }
-    // `<< if`, `<< unless`, `<< case`
-    for kw in &["if", "unless", "case"] {
+    // `return begin` — begin expression returned from a method
+    if trimmed.contains("return begin") {
+        let after = &trimmed[trimmed.find("return begin").unwrap() + 12..];
+        if after.is_empty() || after.starts_with(' ') || after.starts_with('#') {
+            return true;
+        }
+    }
+    // `<< if`, `<< unless`, `<< case`, `<< begin`
+    for kw in &["if", "unless", "case", "begin"] {
         let needle = format!("<< {}", kw);
         if let Some(pos) = trimmed.find(&needle) {
             let after = &trimmed[pos + needle.len()..];
@@ -208,6 +246,75 @@ fn contains_assign_kw(trimmed: &str, kw: &str) -> bool {
     false
 }
 
+/// Returns true if `trimmed` contains a `do` block pattern (` do |`, ` do|`, ` do #`,
+/// ` do;`) **outside** of a string literal. This prevents lines like
+/// `puts ", force: :cascade do |t|"` from being mis-detected as do-block openers.
+fn has_do_pattern_outside_string(trimmed: &str) -> bool {
+    let bytes = trimmed.as_bytes();
+    let n = bytes.len();
+    let mut in_str: Option<u8> = None;
+    let mut i = 0;
+    while i < n {
+        match in_str {
+            Some(_) if bytes[i] == b'\\' => { i += 2; continue; }
+            Some(d) if bytes[i] == d => { in_str = None; i += 1; continue; }
+            Some(_) => { i += 1; continue; }
+            None if bytes[i] == b'\'' || bytes[i] == b'"' => {
+                in_str = Some(bytes[i]); i += 1; continue;
+            }
+            None if bytes[i] == b'#' => break,
+            None => {}
+        }
+        // Check for " do" followed by ` |`, `|`, ` #`, `;`
+        if bytes[i] == b' ' && i + 3 <= n && bytes[i + 1] == b'd' && bytes[i + 2] == b'o' {
+            let after = i + 3;
+            if after < n && matches!(bytes[after], b' ' | b'|' | b'#' | b';') {
+                return true;
+            }
+            // ` do|` — pipe immediately after `do` without space
+            if after < n && bytes[after] == b'|' {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Returns the unclosed paren depth after scanning a line for multi-line percent literals
+/// (`%w(...)`, `%i(...)`, `%W(...)`, `%I(...)`). Returns 0 if no unclosed literal is found.
+fn opening_pct_literal_depth(line: &str) -> i32 {
+    let bytes = line.as_bytes();
+    let n = bytes.len();
+    let mut i = 0;
+    while i + 2 < n {
+        if bytes[i] == b'%'
+            && matches!(bytes[i + 1], b'w' | b'W' | b'i' | b'I')
+            && bytes[i + 2] == b'('
+        {
+            // Count the net unmatched parens from this `(` onwards.
+            let mut depth = 0i32;
+            for &b in &bytes[i + 2..] {
+                match b {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if depth > 0 {
+                return depth;
+            }
+        }
+        i += 1;
+    }
+    0
+}
+
 impl Rule for EndAlignment {
     fn name(&self) -> &'static str {
         "Layout/EndAlignment"
@@ -229,6 +336,11 @@ impl Rule for EndAlignment {
 
         // Heredoc tracking: when inside a heredoc, skip all lines until the terminator.
         let mut in_heredoc: Option<String> = None;
+
+        // Percent-word-literal tracking: when inside a multi-line `%w(...)`, `%i(...)`,
+        // `%W(...)`, or `%I(...)` literal, skip keyword detection — the "words" inside are
+        // string content, not Ruby syntax.
+        let mut pct_literal_depth: i32 = 0;
 
         // Continuation line tracking: if the previous non-comment, non-blank line ends
         // with `\`, the current line is a continuation and should NOT be treated as a
@@ -255,6 +367,22 @@ impl Rule for EndAlignment {
                 in_heredoc = Some(term);
                 // Fall through: the opener line itself still contains real Ruby syntax.
             }
+
+            // Skip percent-literal body lines (`%w(...)`, `%i(...)`, etc. spanning multiple lines).
+            // Ruby keywords inside these literals are string content, not openers.
+            if pct_literal_depth > 0 {
+                for &b in line.as_bytes() {
+                    match b {
+                        b'(' => pct_literal_depth += 1,
+                        b')' => pct_literal_depth -= 1,
+                        _ => {}
+                    }
+                }
+                i += 1;
+                continue;
+            }
+            // Detect multi-line percent literals opening on this line.
+            pct_literal_depth = opening_pct_literal_depth(line);
 
             // Skip comments — also do not update prev_line_continues for comment lines.
             if trimmed.starts_with('#') {
@@ -283,12 +411,10 @@ impl Rule for EndAlignment {
             let is_do_block = !is_continuation && !is_one_liner(trimmed) && (
                 trimmed == "do"
                 || trimmed.ends_with(" do")
-                || trimmed.contains(" do |")
-                || trimmed.contains(" do|")
-                // `method do # trailing comment` — do followed by a comment
-                || trimmed.contains(" do #")
-                // `method do; body` — do followed by semicolon (inline body)
-                || trimmed.contains(" do;")
+                // Use string-aware scan for "do |", "do|", "do #", "do;" patterns so that
+                // these substrings inside string literals (e.g. `puts "cascade do |t|"`)
+                // do not falsely trigger a do-block frame.
+                || has_do_pattern_outside_string(trimmed)
             );
 
             let is_keyword_opener = !is_continuation && !is_one_liner(trimmed) && !is_endless_method(trimmed) && !is_do_block && (
@@ -328,8 +454,7 @@ impl Rule for EndAlignment {
                 || trimmed == "begin" || trimmed.starts_with("begin ")
                 // Continuation line ending with `do` — method call split across lines with `\`
                 || trimmed.ends_with(" do")
-                || trimmed.contains(" do |") || trimmed.contains(" do|")
-                || trimmed.contains(" do #") || trimmed.contains(" do;")
+                || has_do_pattern_outside_string(trimmed)
             );
 
             if is_keyword_opener {
@@ -344,7 +469,14 @@ impl Rule for EndAlignment {
 
             // Detect end tokens: `end` followed by any non-identifier character
             // (covers: end, end.foo, end,, end), end], end if, etc.)
-            let is_end = is_end_token(trimmed);
+            // Also detect `rescue ...; end` / `ensure ...; end` — one-liner rescue/ensure
+            // clauses that close the surrounding begin/def/do block on the same line.
+            let is_end = is_end_token(trimmed) || {
+                let code = strip_inline_comment_for_one_liner(trimmed);
+                let bare_code = code.trim_end();
+                (trimmed.starts_with("rescue") || trimmed.starts_with("ensure"))
+                    && bare_code.ends_with("; end")
+            };
 
             if is_end {
                 if let Some((expected_indent, check)) = stack.pop() {
