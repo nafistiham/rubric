@@ -15,6 +15,22 @@ enum BraceKind {
     TightPipeBlock,
 }
 
+fn extract_heredoc_terminator_sibb(line: &[u8]) -> Option<Vec<u8>> {
+    let n = line.len();
+    let mut i = 0;
+    while i + 1 < n {
+        if line[i] == b'<' && line[i + 1] == b'<' {
+            i += 2;
+            if i < n && (line[i] == b'-' || line[i] == b'~') { i += 1; }
+            if i < n && (line[i] == b'\'' || line[i] == b'"' || line[i] == b'`') { i += 1; }
+            let start = i;
+            while i < n && (line[i].is_ascii_alphanumeric() || line[i] == b'_') { i += 1; }
+            if i > start { return Some(line[start..i].to_vec()); }
+        } else { i += 1; }
+    }
+    None
+}
+
 impl Rule for SpaceInsideBlockBraces {
     fn name(&self) -> &'static str {
         "Layout/SpaceInsideBlockBraces"
@@ -22,10 +38,56 @@ impl Rule for SpaceInsideBlockBraces {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        let mut in_heredoc: Option<Vec<u8>> = None;
         let mut in_multiline_regex = false;
+        // Cross-line percent literal: Some((close_byte, depth))
+        let mut in_multiline_percent: Option<(u8, usize)> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
-            // Skip multiline regex body lines.
+            // ── Heredoc body ─────────────────────────────────────────────────
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim().as_bytes() == term.as_slice() {
+                    in_heredoc = None;
+                }
+                continue;
+            }
+
+            // ── Multiline percent literal body ───────────────────────────────
+            if let Some((close, depth)) = in_multiline_percent {
+                let bytes = line.as_bytes();
+                let nb = bytes.len();
+                let new_state = if depth == 0 {
+                    let mut k = 0;
+                    let mut found = false;
+                    while k < nb {
+                        match bytes[k] {
+                            b'\\' => { k += 2; }
+                            c if c == close => { found = true; break; }
+                            _ => { k += 1; }
+                        }
+                    }
+                    if found { None } else { Some((close, 0usize)) }
+                } else {
+                    let open = match close {
+                        b')' => b'(', b']' => b'[', b'}' => b'{', b'>' => b'<', _ => 0,
+                    };
+                    let mut d = depth;
+                    let mut k = 0;
+                    while k < nb && d > 0 {
+                        match bytes[k] {
+                            b'\\' => { k += 2; }
+                            c if open != 0 && c == open => { d += 1; k += 1; }
+                            c if c == close => { d -= 1; k += 1; }
+                            _ => { k += 1; }
+                        }
+                    }
+                    if d == 0 { None } else { Some((close, d)) }
+                };
+                in_multiline_percent = new_state;
+                continue;
+            }
+
+            // ── Multiline /regex/ body ────────────────────────────────────────
             if in_multiline_regex {
                 let bytes = line.as_bytes();
                 let n = bytes.len();
@@ -70,50 +132,46 @@ impl Rule for SpaceInsideBlockBraces {
                     None => {}
                 }
 
-                // Skip percent literals that use `{` as delimiter.
-                // Handles: %r{}, %{}, %w{}, %i{}, %W{}, %I{}, %q{}, %Q{}
+                // Skip percent literals (any form: %r, %w, %x, %q, %Q, %{, etc.)
                 if b == b'%' && pos + 1 < n {
-                    let next_b = bytes[pos + 1];
-                    // Check for %r, %w, %i, %W, %I, %q, %Q followed by `{`,
-                    // or bare `%` followed directly by `{`.
-                    let (skip_tag_len, is_percent_brace) = match next_b {
-                        b'r' | b'w' | b'i' | b'W' | b'I' | b'q' | b'Q' => {
-                            // %X{ form
-                            if pos + 2 < n && bytes[pos + 2] == b'{' {
-                                (2usize, true)
-                            } else if pos + 2 < n {
-                                // %X with non-brace delimiter — skip as generic literal
-                                let delim = bytes[pos + 2];
-                                pos += 3;
-                                while pos < n && bytes[pos] != delim {
-                                    if bytes[pos] == b'\\' { pos += 2; } else { pos += 1; }
+                    let mut k = pos + 1;
+                    // Optional type letter
+                    if k < n && bytes[k].is_ascii_alphabetic() { k += 1; }
+                    if k < n {
+                        let open = bytes[k];
+                        let (close, is_bracket) = match open {
+                            b'{' => (b'}', true),
+                            b'(' => (b')', true),
+                            b'[' => (b']', true),
+                            b'<' => (b'>', true),
+                            b if b.is_ascii_punctuation() => (b, false),
+                            _ => { pos += 1; continue; }
+                        };
+                        pos = k + 1;
+                        if is_bracket {
+                            let mut depth = 1usize;
+                            while pos < n && depth > 0 {
+                                match bytes[pos] {
+                                    b'\\' => { pos += 2; }
+                                    c if c == open => { depth += 1; pos += 1; }
+                                    c if c == close => { depth -= 1; pos += 1; }
+                                    _ => { pos += 1; }
                                 }
-                                if pos < n { pos += 1; }
-                                continue;
-                            } else {
-                                (0, false)
                             }
-                        }
-                        b'{' => {
-                            // bare %{ form
-                            (1usize, true)
-                        }
-                        _ => (0, false),
-                    };
-
-                    if is_percent_brace {
-                        pos += skip_tag_len + 1; // skip `%`, optional letter(s), and `{`
-                        let mut depth = 1usize;
-                        while pos < n && depth > 0 {
-                            match bytes[pos] {
-                                b'\\' => { pos += 2; }
-                                b'{' => { depth += 1; pos += 1; }
-                                b'}' => { depth -= 1; pos += 1; }
-                                _ => { pos += 1; }
+                            if depth > 0 { in_multiline_percent = Some((close, depth)); }
+                        } else {
+                            let mut closed = false;
+                            while pos < n {
+                                if bytes[pos] == b'\\' { pos += 2; continue; }
+                                if bytes[pos] == close { pos += 1; closed = true; break; }
+                                pos += 1;
                             }
+                            if !closed { in_multiline_percent = Some((close, 0)); }
                         }
                         continue;
                     }
+                    pos += 1;
+                    continue;
                 }
 
                 // Skip /regex/ literals; detect unclosed regex that spans to the next line.
@@ -239,6 +297,13 @@ impl Rule for SpaceInsideBlockBraces {
                 }
 
                 pos += 1;
+            }
+
+            // Detect heredoc opening (body starts on the NEXT line)
+            if in_heredoc.is_none() {
+                if let Some(term) = extract_heredoc_terminator_sibb(bytes) {
+                    in_heredoc = Some(term);
+                }
             }
         }
 

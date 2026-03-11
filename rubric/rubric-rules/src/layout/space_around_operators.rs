@@ -51,6 +51,9 @@ impl Rule for SpaceAroundOperators {
         // Cross-line multiline %r{...} tracking: Some((close_byte, depth)) when a
         // %r percent-regex literal spans multiple lines.
         let mut in_multiline_percent_regex: Option<(u8, usize)> = None;
+        // Cross-line string tracking: Some(delimiter) when a string literal opened on a
+        // previous line hasn't been closed yet.  Covers '"', '\'', and '`'.
+        let mut in_multiline_string: Option<u8> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             // Skip lines that are inside a heredoc body (including the terminator line).
@@ -139,7 +142,8 @@ impl Rule for SpaceAroundOperators {
             let bytes = line.as_bytes();
             let len = bytes.len();
             let mut j = 0;
-            let mut in_string: Option<u8> = None;
+            // Start from any cross-line string state (multiline "...", '...', `...`)
+            let mut in_string: Option<u8> = in_multiline_string;
             let mut in_regex = false;
             // Track if this line is a def header so we can skip = in param defaults
             let is_def_line = trimmed_line.starts_with("def ");
@@ -194,9 +198,26 @@ impl Rule for SpaceAroundOperators {
                             };
                             j = delim_start + 1;
                             if open == close {
-                                // Symmetric delimiter: scan until unescaped close
+                                // Symmetric delimiter: scan until unescaped close.
+                                // Handle `#{...}` interpolation — the close-char inside
+                                // must not prematurely end the literal (e.g. `%r"^#{x}/"`)
                                 while j < len && bytes[j] != close {
-                                    if bytes[j] == b'\\' { j += 2; } else { j += 1; }
+                                    if bytes[j] == b'\\' {
+                                        j += 2;
+                                    } else if bytes[j] == b'#' && j + 1 < len && bytes[j + 1] == b'{' {
+                                        j += 2;
+                                        let mut depth = 1usize;
+                                        while j < len && depth > 0 {
+                                            match bytes[j] {
+                                                b'\\' => { j += 2; }
+                                                b'{' => { depth += 1; j += 1; }
+                                                b'}' => { depth -= 1; j += 1; }
+                                                _ => { j += 1; }
+                                            }
+                                        }
+                                    } else {
+                                        j += 1;
+                                    }
                                 }
                                 if j < len {
                                     j += 1; // consumed the closing delimiter
@@ -237,6 +258,21 @@ impl Rule for SpaceAroundOperators {
                 if in_regex {
                     match b {
                         b'\\' => { j += 2; continue; }
+                        // Skip `#{...}` interpolation inside regex — the `/` inside
+                        // must not prematurely close the outer regex literal.
+                        b'#' if j + 1 < len && bytes[j + 1] == b'{' => {
+                            j += 2;
+                            let mut depth = 1usize;
+                            while j < len && depth > 0 {
+                                match bytes[j] {
+                                    b'\\' => { j += 2; }
+                                    b'{' => { depth += 1; j += 1; }
+                                    b'}' => { depth -= 1; j += 1; }
+                                    _ => { j += 1; }
+                                }
+                            }
+                            continue;
+                        }
                         b'/' => { in_regex = false; }
                         _ => {}
                     }
@@ -285,7 +321,15 @@ impl Rule for SpaceAroundOperators {
                     }
                     Some(delim) if b == delim => { in_string = None; j += 1; continue; }
                     Some(_) => { j += 1; continue; }
-                    None if b == b'"' || b == b'\'' || b == b'`' => { in_string = Some(b); j += 1; continue; }
+                    // String openers, but NOT `$'` (post-match global) or `$`` (pre-match global).
+                    None if b == b'"' || b == b'\'' || b == b'`' => {
+                        let prev_b = if j > 0 { bytes[j-1] } else { 0 };
+                        if prev_b != b'$' {
+                            in_string = Some(b);
+                        }
+                        j += 1;
+                        continue;
+                    }
                     None if b == b'#' => break, // inline comment — stop scanning
                     None => {}
                 }
@@ -300,10 +344,11 @@ impl Rule for SpaceAroundOperators {
                             continue;
                         }
                         // Skip operator method definitions: `def ===(other)`, `def <=>(other)`,
-                        // `private def ===(other)`, etc. The operator is the method name.
+                        // `def self.===(other)`, `def tz.===(zone)`, etc.
+                        // The operator is the method name — not an infix expression.
                         {
                             let before = line[..j].trim_end();
-                            if before.ends_with("def") {
+                            if before.ends_with("def") || before.ends_with('.') {
                                 j += 3;
                                 continue;
                             }
@@ -382,11 +427,13 @@ impl Rule for SpaceAroundOperators {
                             j += 2;
                             continue;
                         }
-                        // Skip operator method definitions: `def ==(other)`, `def !=(other)`
-                        // The operator is the method name — not an infix expression.
+                        // Skip operator method definitions: `def ==(other)`, `def !=(other)`,
+                        // `def self.==(other)`, `def obj.>=(other)` etc.
+                        // Also skip safe-navigation method calls: `obj&.!=`, `obj&.>=`.
+                        // In both cases the operator follows `.` as a method name.
                         if matches!(two, b"==" | b"!=" | b"<=" | b">=") {
                             let before = line[..j].trim_end();
-                            if before.ends_with("def") {
+                            if before.ends_with("def") || before.ends_with('.') {
                                 j += 2;
                                 continue;
                             }
@@ -433,9 +480,20 @@ impl Rule for SpaceAroundOperators {
                             j += 1;
                             continue;
                         }
-                        // Skip setter method definitions: def foo=(val)
-                        // The `=` is part of the method name when followed by `(`
+                        // Skip setter method definitions: def foo=(val) or def foo= (no parens)
+                        // The `=` is part of the method name.
                         if next == b'(' {
+                            j += 1;
+                            continue;
+                        }
+                        // `def foo=` without parentheses: method name ends with `=` at EOL or
+                        // followed by space/newline and `is_def_line` with no prior `=` assignment.
+                        if is_def_line && paren_depth == 0 && (next == 0 || next == b' ' || next == b'\t' || next == b'\n') {
+                            j += 1;
+                            continue;
+                        }
+                        // `alias foo= original` — setter alias; `=` follows the alias name.
+                        if trimmed_line.starts_with("alias ") {
                             j += 1;
                             continue;
                         }
@@ -480,10 +538,12 @@ impl Rule for SpaceAroundOperators {
                     }
                     b'/' => {
                         // `/` after an operator/open-paren/space/unary-! is a regex start.
+                        // Also skip `:/ ` which is a Ruby symbol literal (e.g. `super(:/, l, r)`).
                         let prev = if j > 0 { bytes[j-1] } else { 0 };
                         if prev == b'=' || prev == b'(' || prev == b',' || prev == b'['
                             || prev == b' ' || prev == b'\t' || prev == 0
                             || prev == b'!'  // !/regex/ is valid Ruby
+                            || prev == b':'  // :/ is a symbol literal
                         {
                             in_regex = true;
                             j += 1;
@@ -579,6 +639,14 @@ impl Rule for SpaceAroundOperators {
             // spans multiple lines — mark it so we skip the continuation lines.
             if in_regex {
                 in_multiline_regex = true;
+            }
+
+            // Propagate string state across lines.  If we're still inside a string
+            // at end of line (and not mid-interpolation), the string spans to the next line.
+            if in_string.is_some() && in_interp_depth == 0 {
+                in_multiline_string = in_string;
+            } else {
+                in_multiline_string = None;
             }
         }
 
