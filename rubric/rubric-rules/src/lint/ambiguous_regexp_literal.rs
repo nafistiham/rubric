@@ -2,6 +2,23 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct AmbiguousRegexpLiteral;
 
+fn extract_heredoc_term_arl(line: &[u8]) -> Option<Vec<u8>> {
+    let n = line.len();
+    let mut i = 0;
+    while i + 1 < n {
+        if line[i] == b'<' && line[i + 1] == b'<' {
+            let mut j = i + 2;
+            if j < n && (line[j] == b'-' || line[j] == b'~') { j += 1; }
+            if j < n && (line[j] == b'\'' || line[j] == b'"' || line[j] == b'`') { j += 1; }
+            let start = j;
+            while j < n && (line[j].is_ascii_alphanumeric() || line[j] == b'_') { j += 1; }
+            if j > start { return Some(line[start..j].to_vec()); }
+        }
+        i += 1;
+    }
+    None
+}
+
 impl Rule for AmbiguousRegexpLiteral {
     fn name(&self) -> &'static str {
         "Lint/AmbiguousRegexpLiteral"
@@ -9,8 +26,20 @@ impl Rule for AmbiguousRegexpLiteral {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        let mut in_heredoc: Option<Vec<u8>> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
+            // Skip heredoc body lines
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim().as_bytes() == term.as_slice() {
+                    in_heredoc = None;
+                }
+                continue;
+            }
+            if let Some(term) = extract_heredoc_term_arl(line.as_bytes()) {
+                in_heredoc = Some(term);
+            }
+
             let trimmed = line.trim_start();
             if trimmed.starts_with('#') {
                 continue;
@@ -23,9 +52,10 @@ impl Rule for AmbiguousRegexpLiteral {
             // positions the `/` is unambiguously a regex literal:
             //   `when /pat/`  `if /pat/`  `unless /pat/`  `return /pat/`
             const UNAMBIGUOUS: &[&str] = &[
-                "when", "if", "unless", "while", "until",
+                "when", "if", "elsif", "unless", "while", "until",
                 "return", "yield", "raise", "fail",
-                "and", "or", "not",
+                "and", "or", "not", "rescue", "else",
+                "def",  // `def /(other)` — method named `/`
             ];
 
             let bytes = trimmed.as_bytes();
