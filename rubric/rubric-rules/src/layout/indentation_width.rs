@@ -129,8 +129,8 @@ impl Rule for IndentationWidth {
             // indentation so the approximation is acceptable).
             for &b in line.as_bytes() {
                 match b {
-                    b'[' | b'(' => bracket_depth += 1,
-                    b']' | b')' => {
+                    b'[' | b'(' | b'{' => bracket_depth += 1,
+                    b']' | b')' | b'}' => {
                         bracket_depth -= 1;
                         if bracket_depth < 0 {
                             bracket_depth = 0;
@@ -197,6 +197,19 @@ impl Rule for IndentationWidth {
                     || prev_code.ends_with(" <<")
                     || prev_code.ends_with(" >>");
 
+                // Skip when previous line ends with `.` — method chain split where
+                // continuation line starts with the next method name (not a dot).
+                let is_dot_chain_continuation = prev_code.ends_with('.');
+
+                // Skip when previous line ends with `?` or ` :` — ternary continuation.
+                let is_ternary_continuation = prev_code.ends_with('?')
+                    || prev_code.ends_with(" :");
+
+                // Skip when previous line ends with `begin` — continuation body aligned
+                // to the `begin` keyword (e.g. `params = begin` then `  body` aligned).
+                let is_begin_continuation = prev_code.ends_with(" begin")
+                    || prev_code == "begin";
+
                 // Skip when current line starts with a method-chain dot — this line
                 // is aligned to the receiver on the previous line.
                 let trimmed_line = line.trim_start();
@@ -238,6 +251,8 @@ impl Rule for IndentationWidth {
                 if !is_comma_continuation && !is_bracket_continuation
                     && !is_backslash_continuation && !is_boolean_continuation
                     && !is_operator_continuation
+                    && !is_dot_chain_continuation && !is_ternary_continuation
+                    && !is_begin_continuation
                     && !is_method_chain && !is_after_branch_keyword
                     && !is_closing_token && inline_cond_depth == 0
                     && entering_depth == 0  // skip lines inside bracket expressions
