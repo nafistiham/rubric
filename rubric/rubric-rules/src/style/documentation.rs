@@ -23,6 +23,12 @@ impl Rule for Documentation {
                 continue;
             }
 
+            // Skip if the class/module line itself has an inline `:nodoc:` annotation.
+            // RuboCop exempts `class Foo # :nodoc:` and `module Bar # :nodoc: all`.
+            if trimmed.contains("# :nodoc:") {
+                continue;
+            }
+
             // Look backwards (ignoring blank lines) for a comment line
             let mut has_doc = false;
             if i > 0 {

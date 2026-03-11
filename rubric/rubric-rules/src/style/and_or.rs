@@ -203,6 +203,9 @@ impl Rule for AndOr {
         // When Some((close_char, depth)), the current line is inside a multiline
         // percent literal (e.g. %w(...) or %{...}) that spans multiple lines.
         let mut in_multiline_percent: Option<(u8, usize)> = None;
+        // Track cross-line multiline double-quoted or single-quoted string.
+        // When Some(delim), the current line is inside an unclosed string literal.
+        let mut in_multiline_string: Option<u8> = None;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
@@ -213,6 +216,20 @@ impl Rule for AndOr {
                     in_heredoc = None;
                 }
                 continue; // skip heredoc body lines
+            }
+
+            // If inside a multiline double/single-quoted string, scan for close.
+            if let Some(delim) = in_multiline_string {
+                let bytes = line.as_bytes();
+                let mut j = 0;
+                let mut closed = false;
+                while j < bytes.len() {
+                    if bytes[j] == b'\\' { j += 2; continue; }
+                    if bytes[j] == delim { closed = true; break; }
+                    j += 1;
+                }
+                if closed { in_multiline_string = None; }
+                continue; // skip: all content is inside the string
             }
 
             // If we're inside a multiline percent literal, scan for the closing
@@ -354,6 +371,27 @@ impl Rule for AndOr {
                         break;
                     }
                 }
+            }
+
+            // After processing this line, detect if it ends inside an unclosed
+            // double- or single-quoted string. If so, subsequent lines are
+            // inside that string and must be skipped.
+            {
+                let mut str_state: Option<u8> = None;
+                let mut j = 0;
+                while j < bytes.len() {
+                    let b = bytes[j];
+                    match str_state {
+                        Some(_) if b == b'\\' => { j += 2; continue; }
+                        Some(d) if b == d => { str_state = None; }
+                        Some(_) => {}
+                        None if b == b'"' || b == b'\'' => { str_state = Some(b); }
+                        None if b == b'#' => break,
+                        None => {}
+                    }
+                    j += 1;
+                }
+                in_multiline_string = str_state;
             }
         }
 
