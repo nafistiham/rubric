@@ -2,6 +2,13 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct RedundantSplatExpansion;
 
+/// Ruby keywords that can appear immediately before a `/regex/` literal.
+const REGEX_PRECEDING_KEYWORDS: &[&[u8]] = &[
+    b"if", b"unless", b"while", b"until", b"and", b"or", b"not",
+    b"return", b"when", b"do", b"then", b"else", b"elsif", b"case",
+    b"yield", b"rescue", b"in",
+];
+
 /// Returns true when `/` at position `j` in `bytes` starts a regex literal
 /// rather than a division operator.
 fn slash_starts_regex(bytes: &[u8], j: usize) -> bool {
@@ -11,7 +18,20 @@ fn slash_starts_regex(bytes: &[u8], j: usize) -> bool {
         k -= 1;
         let b = bytes[k];
         if b == b' ' || b == b'\t' { continue; }
-        if b.is_ascii_alphanumeric() || b == b'_' || b == b')' || b == b']' {
+        if b == b')' || b == b']' { return false; }
+        if b.is_ascii_alphanumeric() || b == b'_' {
+            // Extract the full preceding word to check if it's a keyword.
+            let word_end = k + 1;
+            let mut word_start = k;
+            while word_start > 0
+                && (bytes[word_start - 1].is_ascii_alphanumeric() || bytes[word_start - 1] == b'_')
+            {
+                word_start -= 1;
+            }
+            let word = &bytes[word_start..word_end];
+            if REGEX_PRECEDING_KEYWORDS.iter().any(|kw| *kw == word) {
+                return true;
+            }
             return false;
         }
         return true;

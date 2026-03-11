@@ -9,6 +9,10 @@ impl Rule for TrailingNewlines {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let source = ctx.source;
+        // Empty files are excluded (rubocop does not flag them).
+        if source.is_empty() {
+            return vec![];
+        }
         if source.ends_with("\n\n") || !source.ends_with('\n') {
             let offset = source.len().saturating_sub(1) as u32;
             let msg = if source.ends_with("\n\n") {

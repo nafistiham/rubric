@@ -2,6 +2,53 @@ use rubric_core::{Diagnostic, Fix, FixSafety, LintContext, Rule, Severity, TextE
 
 pub struct LeadingCommentSpace;
 
+/// Scan a code line (not a comment) for an unclosed `/regex/` literal.
+/// Returns `true` if a regex opens on this line but does not close before
+/// end-of-line, indicating the next lines are part of a multiline regex body.
+fn opens_unclosed_regex(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let n = bytes.len();
+    let mut i = 0;
+    let mut in_string: Option<u8> = None;
+
+    while i < n {
+        let b = bytes[i];
+
+        if let Some(q) = in_string {
+            if b == b'\\' { i += 2; continue; }
+            if b == q { in_string = None; }
+            i += 1;
+            continue;
+        }
+
+        // Stop at inline comment
+        if b == b'#' { break; }
+
+        match b {
+            b'"' | b'\'' | b'`' => { in_string = Some(b); }
+            b'/' => {
+                // Heuristic: `/` starts a regex when preceded by space, `=`, `(`, `,`, `[`, `|`,
+                // or start of content (0).
+                let prev = if i > 0 { bytes[i - 1] } else { 0 };
+                if matches!(prev, b'=' | b'(' | b',' | b'[' | b'|' | b' ' | b'\t' | 0) {
+                    // Try to find closing `/`
+                    i += 1;
+                    while i < n {
+                        if bytes[i] == b'\\' { i += 2; continue; }
+                        if bytes[i] == b'/' { return false; } // closed on this line
+                        i += 1;
+                    }
+                    // Didn't close — multiline regex
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
 /// Extract the heredoc terminator word from a line that contains `<<` or `<<-` or `<<~`.
 /// Returns the bare terminator string (without quotes) if found, or `None`.
 fn extract_heredoc_terminator(line: &str) -> Option<String> {
@@ -53,6 +100,8 @@ impl Rule for LeadingCommentSpace {
         // When `Some(terminator)`, we are inside a heredoc and skip lines
         // until we see a line whose trimmed content equals the terminator.
         let mut heredoc_terminator: Option<String> = None;
+        // Cross-line /regex/ state: true while inside a multiline /regex/.
+        let mut in_multiline_regex = false;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             // ── Heredoc tracking ─────────────────────────────────────────────
@@ -63,6 +112,21 @@ impl Rule for LeadingCommentSpace {
                     heredoc_terminator = None;
                 }
                 // Either way: this line is inside (or ends) the heredoc — skip it
+                continue;
+            }
+
+            // ── Multiline /regex/ body ────────────────────────────────────────
+            if in_multiline_regex {
+                // Scan for closing `/`
+                let bytes = line.as_bytes();
+                let mut k = 0;
+                while k < bytes.len() {
+                    match bytes[k] {
+                        b'\\' => { k += 2; }
+                        b'/' => { in_multiline_regex = false; break; }
+                        _ => { k += 1; }
+                    }
+                }
                 continue;
             }
 
@@ -81,6 +145,10 @@ impl Rule for LeadingCommentSpace {
             let trimmed = line.trim_start();
             // Only check lines where the first non-space character is `#`
             if !trimmed.starts_with('#') {
+                // Detect if this line opens an unclosed /regex/ that spans to next lines
+                if opens_unclosed_regex(line) {
+                    in_multiline_regex = true;
+                }
                 continue;
             }
 
@@ -97,6 +165,11 @@ impl Rule for LeadingCommentSpace {
 
             // Skip `##` (YARD doc comment markers, RDoc section headers)
             if bytes[1] == b'#' {
+                continue;
+            }
+
+            // Skip `#--` and `#++` (RDoc documentation suppression/resumption markers)
+            if bytes[1] == b'-' || bytes[1] == b'+' {
                 continue;
             }
 

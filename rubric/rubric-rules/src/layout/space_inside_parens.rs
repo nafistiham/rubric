@@ -19,6 +19,86 @@ fn extract_heredoc_terminator(line: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+/// Skip a percent literal starting at `j` (which points at `%`).
+/// Returns `(new_j, multiline_state)`:
+/// - `new_j`: position after the literal if closed, or `bytes.len()` if not.
+/// - `multiline_state`: `None` if closed; `Some((close, depth))` if still open
+///   (depth=0 for same-char delimiters, ≥1 for bracket-style).
+/// Returns `(j + 1, None)` if `%` is not a valid percent literal opener.
+fn skip_percent_literal_sip(bytes: &[u8], j: usize) -> (usize, Option<(u8, usize)>) {
+    let n = bytes.len();
+    let mut k = j + 1;
+    // Optional type letter
+    if k < n
+        && matches!(
+            bytes[k],
+            b'r' | b'q' | b'Q' | b'w' | b'W' | b'i' | b'I' | b's' | b'x'
+        )
+    {
+        k += 1;
+    }
+    if k >= n {
+        return (j + 1, None);
+    }
+    let open = bytes[k];
+    let close = match open {
+        b'{' => b'}',
+        b'(' => b')',
+        b'[' => b']',
+        b'<' => b'>',
+        b if b.is_ascii_punctuation() => b, // same-char delimiter
+        _ => return (j + 1, None),
+    };
+    k += 1;
+    if open == close {
+        while k < n {
+            match bytes[k] {
+                b'\\' => { k += 2; }
+                c if c == close => { k += 1; return (k, None); }
+                _ => { k += 1; }
+            }
+        }
+        (n, Some((close, 0)))
+    } else {
+        let mut depth = 1usize;
+        while k < n && depth > 0 {
+            match bytes[k] {
+                b'\\' => { k += 2; }
+                c if c == open => { depth += 1; k += 1; }
+                c if c == close => { depth -= 1; k += 1; }
+                _ => { k += 1; }
+            }
+        }
+        if depth == 0 { (k, None) } else { (n, Some((close, depth))) }
+    }
+}
+
+/// Skip `#{...}` interpolation starting at `j` (pointing at `#`).
+/// Caller must have verified `bytes[j+1] == b'{'`.
+fn skip_interpolation_sip(bytes: &[u8], start: usize) -> usize {
+    let n = bytes.len();
+    let mut j = start + 2;
+    let mut depth = 1usize;
+    while j < n && depth > 0 {
+        match bytes[j] {
+            b'\\' => { j += 2; }
+            b'{' => { depth += 1; j += 1; }
+            b'}' => { depth -= 1; j += 1; }
+            b'"' | b'\'' | b'`' => {
+                let delim = bytes[j];
+                j += 1;
+                while j < n {
+                    if bytes[j] == b'\\' { j += 2; continue; }
+                    if bytes[j] == delim { j += 1; break; }
+                    j += 1;
+                }
+            }
+            _ => { j += 1; }
+        }
+    }
+    j
+}
+
 impl Rule for SpaceInsideParens {
     fn name(&self) -> &'static str {
         "Layout/SpaceInsideParens"
@@ -28,16 +108,19 @@ impl Rule for SpaceInsideParens {
         let mut diags = Vec::new();
 
         let mut in_heredoc: Option<Vec<u8>> = None;
-        let mut in_percent_regex: bool = false;
-        let mut percent_regex_depth: usize = 0;
-        let mut in_percent_regex_close: u8 = b'}';
+        // Cross-line percent literal: Some((close_byte, depth))
+        let mut in_multiline_percent: Option<(u8, usize)> = None;
+        // Cross-line /regex/ state
+        let mut in_multiline_regex = false;
+        // Cross-line backtick string
+        let mut in_multiline_string: Option<u8> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             let line_start = ctx.line_start_offsets[i] as usize;
             let bytes = line.as_bytes();
             let len = bytes.len();
 
-            // Skip heredoc body lines
+            // ── Heredoc body ─────────────────────────────────────────────────
             if let Some(ref term) = in_heredoc.clone() {
                 if line.trim().as_bytes() == term.as_slice() {
                     in_heredoc = None;
@@ -45,29 +128,61 @@ impl Rule for SpaceInsideParens {
                 continue;
             }
 
-            // Continue scanning through a multiline %r{...} body
-            if in_percent_regex {
+            // ── Multiline percent literal ────────────────────────────────────
+            if let Some((close, depth)) = in_multiline_percent {
+                let new_state = if depth == 0 {
+                    let mut k = 0;
+                    let mut found = false;
+                    while k < len {
+                        match bytes[k] {
+                            b'\\' => { k += 2; }
+                            c if c == close => { found = true; break; }
+                            _ => { k += 1; }
+                        }
+                    }
+                    if found { None } else { Some((close, 0usize)) }
+                } else {
+                    let open = match close {
+                        b')' => b'(', b']' => b'[', b'}' => b'{', b'>' => b'<', _ => 0,
+                    };
+                    let mut d = depth;
+                    let mut k = 0;
+                    while k < len && d > 0 {
+                        match bytes[k] {
+                            b'\\' => { k += 2; }
+                            c if open != 0 && c == open => { d += 1; k += 1; }
+                            c if c == close => { d -= 1; k += 1; }
+                            _ => { k += 1; }
+                        }
+                    }
+                    if d == 0 { None } else { Some((close, d)) }
+                };
+                in_multiline_percent = new_state;
+                continue;
+            }
+
+            // ── Multiline /regex/ ────────────────────────────────────────────
+            if in_multiline_regex {
                 let mut k = 0;
                 while k < len {
-                    let b = bytes[k];
-                    if b == b'\\' { k += 2; continue; }
-                    let open_bracket = match in_percent_regex_close {
-                        b')' => b'(',
-                        b']' => b'[',
-                        b'}' => b'{',
-                        b'>' => b'<',
-                        c => c,
-                    };
-                    if b == in_percent_regex_close {
-                        if percent_regex_depth == 0 {
-                            in_percent_regex = false;
-                            break;
-                        }
-                        percent_regex_depth -= 1;
-                    } else if b == open_bracket {
-                        percent_regex_depth += 1;
+                    match bytes[k] {
+                        b'\\' => { k += 2; }
+                        b'/' => { in_multiline_regex = false; break; }
+                        _ => { k += 1; }
                     }
-                    k += 1;
+                }
+                continue;
+            }
+
+            // ── Continuing a multiline backtick string ───────────────────────
+            if let Some(delim) = in_multiline_string {
+                let mut k = 0;
+                while k < len {
+                    match bytes[k] {
+                        b'\\' => { k += 2; }
+                        c if c == delim => { in_multiline_string = None; break; }
+                        _ => { k += 1; }
+                    }
                 }
                 continue;
             }
@@ -79,7 +194,7 @@ impl Rule for SpaceInsideParens {
             while j < len {
                 let b = bytes[j];
 
-                // Skip regex body — parens inside regex literals are not Ruby parens.
+                // ── Inside /regex/ ───────────────────────────────────────────
                 if in_regex {
                     if b == b'\\' { j += 2; continue; }
                     if b == b'/' { in_regex = false; }
@@ -87,104 +202,83 @@ impl Rule for SpaceInsideParens {
                     continue;
                 }
 
+                // ── Inside a string ──────────────────────────────────────────
                 match in_string {
                     Some(_) if b == b'\\' => { j += 2; continue; }
+                    Some(b'"') | Some(b'`')
+                        if b == b'#' && j + 1 < len && bytes[j + 1] == b'{' =>
+                    {
+                        j = skip_interpolation_sip(bytes, j);
+                        continue;
+                    }
                     Some(delim) if b == delim => { in_string = None; j += 1; continue; }
                     Some(_) => { j += 1; continue; }
-                    None if b == b'"' || b == b'\'' => { in_string = Some(b); j += 1; continue; }
-                    None if b == b'#' => break, // comment
-                    None => {}
-                }
-
-                // Skip bare %(...) — percent string using parens as delimiters
-                if b == b'%' && j + 1 < len && bytes[j + 1] == b'(' {
-                    j += 2; // skip %(
-                    let mut depth = 1usize;
-                    while j < len && depth > 0 {
-                        match bytes[j] {
-                            b'\\' => { j += 2; }
-                            b'(' => { depth += 1; j += 1; }
-                            b')' => { depth -= 1; j += 1; }
-                            _ => { j += 1; }
-                        }
-                    }
-                    continue;
-                }
-
-                // Skip %q(...), %Q(...), %w(...), %W(...), etc. with ( delimiter
-                if b == b'%' && j + 1 < len && bytes[j + 1].is_ascii_alphabetic()
-                    && bytes[j + 1] != b'r' && j + 2 < len && bytes[j + 2] == b'('
-                {
-                    j += 3; // skip %q(
-                    let mut depth = 1usize;
-                    while j < len && depth > 0 {
-                        match bytes[j] {
-                            b'\\' => { j += 2; }
-                            b'(' => { depth += 1; j += 1; }
-                            b')' => { depth -= 1; j += 1; }
-                            _ => { j += 1; }
-                        }
-                    }
-                    continue;
-                }
-
-                // Detect %r{...} (or %r(...) etc.) percent regex opener
-                if b == b'%' && j + 1 < len && bytes[j + 1] == b'r' && j + 2 < len {
-                    let delim = bytes[j + 2];
-                    let close = match delim {
-                        b'{' => Some(b'}'),
-                        b'(' => Some(b')'),
-                        b'[' => Some(b']'),
-                        b'<' => Some(b'>'),
-                        _ => None,
-                    };
-                    if let Some(close_byte) = close {
-                        in_percent_regex = true;
-                        in_percent_regex_close = close_byte;
-                        percent_regex_depth = 0;
-                        j += 3; // skip %r{
-                        // Scan the rest of this line for the closing delimiter
+                    // Backtick string
+                    None if b == b'`' => {
+                        j += 1;
+                        let mut closed = false;
                         while j < len {
-                            let pb = bytes[j];
-                            if pb == b'\\' { j += 2; continue; }
-                            let open_bracket = match in_percent_regex_close {
-                                b')' => b'(',
-                                b']' => b'[',
-                                b'}' => b'{',
-                                b'>' => b'<',
-                                c => c,
-                            };
-                            if pb == in_percent_regex_close {
-                                if percent_regex_depth == 0 {
-                                    in_percent_regex = false;
-                                    j += 1;
-                                    break;
+                            match bytes[j] {
+                                b'\\' => { j += 2; }
+                                b'#' if j + 1 < len && bytes[j + 1] == b'{' => {
+                                    j = skip_interpolation_sip(bytes, j);
                                 }
-                                percent_regex_depth -= 1;
-                            } else if pb == open_bracket {
-                                percent_regex_depth += 1;
+                                b'`' => { closed = true; j += 1; break; }
+                                _ => { j += 1; }
                             }
-                            j += 1;
+                        }
+                        if !closed {
+                            in_multiline_string = Some(b'`');
                         }
                         continue;
                     }
+                    None if b == b'"' || b == b'\'' => { in_string = Some(b); j += 1; continue; }
+                    None if b == b'#' => break, // inline comment
+                    None => {}
                 }
 
-                // Detect regex opener: `/` preceded by `=`, `(`, `,`, `[`, space, tab, or
-                // start-of-content. This avoids treating division `/` as a regex opener.
-                if b == b'/' && in_string.is_none() {
+                // ── Percent literals (any form) ──────────────────────────────
+                if b == b'%' && j + 1 < len {
+                    let (new_j, ml_state) = skip_percent_literal_sip(bytes, j);
+                    if let Some(state) = ml_state {
+                        in_multiline_percent = Some(state);
+                    }
+                    j = new_j;
+                    continue;
+                }
+
+                // ── Regex opener ─────────────────────────────────────────────
+                if b == b'/' {
                     let prev = if j > 0 { bytes[j - 1] } else { 0 };
                     if matches!(prev, b'=' | b'(' | b',' | b'[' | b' ' | b'\t' | 0) {
                         in_regex = true;
                         j += 1;
+                        // Check if regex closes on this line
+                        let mut closed = false;
+                        while j < len {
+                            match bytes[j] {
+                                b'\\' => { j += 2; }
+                                b'/' => { closed = true; j += 1; break; }
+                                _ => { j += 1; }
+                            }
+                        }
+                        if !closed {
+                            in_multiline_regex = true;
+                        }
+                        in_regex = false;
                         continue;
                     }
                 }
 
-                // Detect `( ` — open paren followed by space (skip `()`)
-                if b == b'(' {
-                    if j + 1 < len && bytes[j+1] == b' ' {
-                        // Not an empty paren check needed since `( )` would also be caught by ` )`
+                // ── `( ` — space after open paren ────────────────────────────
+                if b == b'(' && j + 1 < len && bytes[j + 1] == b' ' {
+                    // Skip if the space is only before a comment or end of content
+                    // (e.g., `Regexp.union( # :nodoc:` or `( #Either`)
+                    let mut k = j + 1;
+                    while k < len && bytes[k] == b' ' {
+                        k += 1;
+                    }
+                    if k < len && bytes[k] != b'#' {
                         let pos = (line_start + j + 1) as u32;
                         diags.push(Diagnostic {
                             rule: self.name(),
@@ -195,19 +289,17 @@ impl Rule for SpaceInsideParens {
                     }
                 }
 
-                // Detect ` )` — space before close paren
-                if b == b')' {
-                    if j > 0 && bytes[j-1] == b' ' {
-                        // Skip if `)` is the first non-space character (indented multiline close)
-                        if bytes[..j].iter().any(|&b| b != b' ') {
-                            let pos = (line_start + j - 1) as u32;
-                            diags.push(Diagnostic {
-                                rule: self.name(),
-                                message: "Space before `)` detected.".into(),
-                                range: TextRange::new(pos, pos + 1),
-                                severity: Severity::Warning,
-                            });
-                        }
+                // ── ` )` — space before close paren ──────────────────────────
+                if b == b')' && j > 0 && bytes[j - 1] == b' ' {
+                    // Skip if `)` is the first non-space character (indented multiline close)
+                    if bytes[..j].iter().any(|&c| c != b' ') {
+                        let pos = (line_start + j - 1) as u32;
+                        diags.push(Diagnostic {
+                            rule: self.name(),
+                            message: "Space before `)` detected.".into(),
+                            range: TextRange::new(pos, pos + 1),
+                            severity: Severity::Warning,
+                        });
                     }
                 }
 

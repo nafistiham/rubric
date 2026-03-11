@@ -94,14 +94,14 @@ fn pos_context(line: &[u8], pos: usize) -> PosContext {
                 if b == b'\\' {
                     i += 2;
                     continue;
-                } else if b == open {
-                    percent_depth += 1;
                 } else if b == close {
                     if percent_depth == 0 {
                         state = State::Code;
                     } else {
                         percent_depth -= 1;
                     }
+                } else if b == open && open != close {
+                    percent_depth += 1;
                 }
             }
             State::Code => {
@@ -182,6 +182,8 @@ fn matching_close(open: u8) -> Option<u8> {
         b'{' => Some(b'}'),
         b'<' => Some(b'>'),
         b'|' => Some(b'|'),
+        b'/' => Some(b'/'),
+        b'!' => Some(b'!'),
         _ => None,
     }
 }
@@ -197,6 +199,10 @@ impl Rule for AndOr {
 
         // Track heredoc state
         let mut in_heredoc: Option<String> = None;
+        // Track cross-line multiline string/percent-literal state.
+        // When Some((close_char, depth)), the current line is inside a multiline
+        // percent literal (e.g. %w(...) or %{...}) that spans multiple lines.
+        let mut in_multiline_percent: Option<(u8, usize)> = None;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
@@ -207,6 +213,31 @@ impl Rule for AndOr {
                     in_heredoc = None;
                 }
                 continue; // skip heredoc body lines
+            }
+
+            // If we're inside a multiline percent literal, scan for the closing
+            // delimiter (depth-tracked for bracket delimiters).
+            if let Some((close, ref mut depth)) = in_multiline_percent {
+                let open = match close { b')' => b'(', b']' => b'[', b'}' => b'{', b'>' => b'<', c => c };
+                let bytes = line.as_bytes();
+                let mut found_close = false;
+                let mut j = 0;
+                while j < bytes.len() {
+                    if bytes[j] == b'\\' { j += 2; continue; }
+                    if bytes[j] == open && open != close { *depth += 1; }
+                    else if bytes[j] == close {
+                        if *depth == 0 { found_close = true; break; }
+                        *depth -= 1;
+                    }
+                    j += 1;
+                }
+                if found_close {
+                    in_multiline_percent = None;
+                    // The rest of the line after the close might have code; but
+                    // to be safe we skip the whole line (close is rarely followed
+                    // by `and`/`or` in practice).
+                }
+                continue;
             }
 
             if trimmed.starts_with('#') {
@@ -221,6 +252,67 @@ impl Rule for AndOr {
             }
 
             let bytes = line.as_bytes();
+
+            // Detect multiline percent literals opened on this line that don't
+            // close before end-of-line. We scan for `%`, optional sigil letter,
+            // bracket/delimiter char, and then look for the matching close.
+            {
+                let mut j = 0;
+                let mut found_multiline = false;
+                let mut in_str: Option<u8> = None;
+                while j < bytes.len() {
+                    match in_str {
+                        Some(_) if bytes[j] == b'\\' => { j += 2; continue; }
+                        Some(d) if bytes[j] == d => { in_str = None; j += 1; continue; }
+                        Some(_) => { j += 1; continue; }
+                        None if bytes[j] == b'"' || bytes[j] == b'\'' => { in_str = Some(bytes[j]); j += 1; continue; }
+                        None if bytes[j] == b'#' => break,
+                        None => {}
+                    }
+                    if bytes[j] == b'%' && j + 1 < bytes.len() {
+                        let mut k = j + 1;
+                        if k < bytes.len() && bytes[k].is_ascii_alphabetic() { k += 1; }
+                        if k < bytes.len() {
+                            let open = bytes[k];
+                            let close = match open {
+                                b'(' => b')', b'[' => b']', b'{' => b'}', b'<' => b'>',
+                                c if c.is_ascii_punctuation() => c,
+                                _ => { j += 1; continue; }
+                            };
+                            // Scan forward to find the matching close (or end of line).
+                            let mut depth = 0usize;
+                            let mut m = k + 1;
+                            let mut closed = false;
+                            while m < bytes.len() {
+                                if bytes[m] == b'\\' { m += 2; continue; }
+                                if bytes[m] == open && open != close { depth += 1; }
+                                else if bytes[m] == close {
+                                    if depth == 0 { closed = true; break; }
+                                    depth -= 1;
+                                }
+                                m += 1;
+                            }
+                            if !closed {
+                                // Multiline percent literal — mark and skip subsequent lines.
+                                in_multiline_percent = Some((close, depth));
+                                found_multiline = true;
+                                break;
+                            }
+                            j = m + 1;
+                            continue;
+                        }
+                    }
+                    j += 1;
+                }
+                if found_multiline {
+                    // The opener line itself might have `and`/`or` before the %{,
+                    // but after it everything is non-code. To keep it simple and
+                    // avoid FPs, skip searching on this line when it opens a
+                    // multiline percent literal. Real violations on the opener
+                    // line (before the `%`) are rare.
+                    continue;
+                }
+            }
 
             for (pattern, kw_len) in &[(" and ", 3usize), (" or ", 2usize)] {
                 let mut search_start = 0usize;
