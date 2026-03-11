@@ -80,6 +80,30 @@ fn has_non_symbol_rocket_key(line: &str) -> bool {
     false
 }
 
+/// Returns the net count of unquoted `{` minus `}` on `line`, ignoring strings and comments.
+fn net_unquoted_braces(line: &str) -> i32 {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut in_string: Option<u8> = None;
+    let mut count: i32 = 0;
+    let mut j = 0;
+    while j < len {
+        let b = bytes[j];
+        match in_string {
+            Some(_) if b == b'\\' => { j += 2; continue; }
+            Some(delim) if b == delim => { in_string = None; j += 1; continue; }
+            Some(_) => { j += 1; continue; }
+            None if b == b'"' || b == b'\'' => { in_string = Some(b); j += 1; continue; }
+            None if b == b'#' => break,
+            None if b == b'{' => { count += 1; }
+            None if b == b'}' => { count -= 1; }
+            None => {}
+        }
+        j += 1;
+    }
+    count
+}
+
 /// Returns true if any of the next `max_look` lines (starting at `start`)
 /// contains a non-symbol rocket key — indicating that the current symbol-rocket
 /// line is a continuation of a mixed-key hash/call.
@@ -118,8 +142,11 @@ impl Rule for HashSyntax {
         // non-symbol rocket key. When true, continuation lines that only contain
         // symbol rocket keys are part of a mixed-key call and must be skipped.
         let mut in_mixed_key_continuation = false;
+        let mut mixed_key_nesting: i32 = 0; // net unclosed braces from mixed-key context
         // Heredoc tracking: skip body lines
         let mut in_heredoc: Option<Vec<u8>> = None;
+        // Multiline percent literal tracking (e.g. %{ ... })
+        let mut in_multiline_percent: Option<(u8, usize)> = None; // (close_char, depth)
 
         for (i, line) in ctx.lines.iter().enumerate() {
             // Skip heredoc body lines
@@ -146,16 +173,110 @@ impl Rule for HashSyntax {
                 }
             }
 
+            // If inside a multiline percent literal body, scan for close
+            if let Some((close, ref mut depth)) = in_multiline_percent {
+                let open = match close { b')' => b'(', b']' => b'[', b'}' => b'{', b'>' => b'<', c => c };
+                let bytes = line.as_bytes();
+                let mut found_close = false;
+                let mut j = 0;
+                while j < bytes.len() {
+                    if bytes[j] == b'\\' { j += 2; continue; }
+                    if bytes[j] == open && open != close { *depth += 1; }
+                    else if bytes[j] == close {
+                        if *depth == 0 { found_close = true; break; }
+                        *depth -= 1;
+                    }
+                    j += 1;
+                }
+                if found_close { in_multiline_percent = None; }
+                continue;
+            }
+            // Detect multiline percent literal openers (e.g. `%{`, `%(`, `%[`)
+            {
+                let b = line.as_bytes();
+                let mut k = 0;
+                let mut in_str: Option<u8> = None;
+                while k < b.len() {
+                    match in_str {
+                        Some(_) if b[k] == b'\\' => { k += 2; continue; }
+                        Some(d) if b[k] == d => { in_str = None; k += 1; continue; }
+                        Some(_) => { k += 1; continue; }
+                        None if b[k] == b'"' || b[k] == b'\'' => { in_str = Some(b[k]); k += 1; continue; }
+                        None if b[k] == b'#' => break,
+                        None => {}
+                    }
+                    if b[k] == b'%' && k + 1 < b.len() {
+                        let mut m = k + 1;
+                        if m < b.len() && b[m].is_ascii_alphabetic() { m += 1; }
+                        if m < b.len() {
+                            let open = b[m];
+                            let close = match open {
+                                b'(' => b')', b'[' => b']', b'{' => b'}', b'<' => b'>',
+                                c if c.is_ascii_punctuation() && !c.is_ascii_alphanumeric() => c,
+                                _ => { k += 1; continue; }
+                            };
+                            // Check if the literal closes before end of line
+                            let mut depth = 0usize;
+                            let mut n2 = m + 1;
+                            let mut closed = false;
+                            while n2 < b.len() {
+                                if b[n2] == b'\\' { n2 += 2; continue; }
+                                if b[n2] == open && open != close { depth += 1; }
+                                else if b[n2] == close {
+                                    if depth == 0 { closed = true; break; }
+                                    depth -= 1;
+                                }
+                                n2 += 1;
+                            }
+                            if !closed {
+                                in_multiline_percent = Some((close, depth));
+                            }
+                            break;
+                        }
+                    }
+                    k += 1;
+                }
+            }
+            // If we just entered a multiline percent literal, skip this line
+            if in_multiline_percent.is_some() {
+                continue;
+            }
+
             let line_start = ctx.line_start_offsets[i] as usize;
             let bytes = line.as_bytes();
             let len = bytes.len();
             let mut in_string: Option<u8> = None;
+            let mut in_regex = false;
             let mut j = 0;
+
+            // If we're in a mixed-key continuation, skip this line and update nesting/state.
+            // Check this BEFORE has_non_symbol_rocket_key so that inner lines of a
+            // continuation (which may themselves contain balanced `{...}` with non-symbol
+            // keys) don't accidentally reset mixed_key_nesting.
+            if in_mixed_key_continuation {
+                let net = net_unquoted_braces(line);
+                mixed_key_nesting += net;
+                let trimmed_end = line.trim_end();
+                let code_end = {
+                    let mut end = trimmed_end;
+                    if let Some(p) = trimmed_end.find(" #") { end = &trimmed_end[..p]; }
+                    end.trim_end()
+                };
+                // Continuation continues if inner nesting still open OR line ends with `,`/`(`/`\`
+                in_mixed_key_continuation = mixed_key_nesting > 0
+                    || code_end.ends_with(',')
+                    || code_end.ends_with('(')
+                    || code_end.ends_with("\\");
+                continue;
+            }
 
             // Skip lines that contain a mix of symbol and non-symbol rocket keys.
             // RuboCop's `ruby19_no_mixed_keys` enforcement leaves such hashes alone.
             if has_non_symbol_rocket_key(line) {
-                // If this line ends with `,` (open argument list), set continuation.
+                // Track unclosed braces — if net > 0 an inner block is open and we
+                // must keep continuation even if the line doesn't end with `,`.
+                let net = net_unquoted_braces(line);
+                mixed_key_nesting = net;
                 let trimmed_end = line.trim_end();
                 let code_end = {
                     // Strip trailing inline comment
@@ -163,23 +284,8 @@ impl Rule for HashSyntax {
                     if let Some(p) = trimmed_end.find(" #") { end = &trimmed_end[..p]; }
                     end.trim_end()
                 };
-                in_mixed_key_continuation = code_end.ends_with(',')
-                    || code_end.ends_with('(')
-                    || code_end.ends_with("\\");
-                continue;
-            }
-
-            // If we're in a mixed-key continuation from the previous line, skip
-            // symbol-rocket violations on this line. Update continuation state.
-            if in_mixed_key_continuation {
-                let trimmed_end = line.trim_end();
-                let code_end = {
-                    let mut end = trimmed_end;
-                    if let Some(p) = trimmed_end.find(" #") { end = &trimmed_end[..p]; }
-                    end.trim_end()
-                };
-                // Continuation continues if line ends with `,` or `(` or `\`
-                in_mixed_key_continuation = code_end.ends_with(',')
+                in_mixed_key_continuation = mixed_key_nesting > 0
+                    || code_end.ends_with(',')
                     || code_end.ends_with('(')
                     || code_end.ends_with("\\");
                 continue;
@@ -192,8 +298,18 @@ impl Rule for HashSyntax {
             // After processing the loop body, check if this line is a "pure symbol"
             // rocket line ending with `,` — in that case, continuation stays false.
 
+            // Track last non-whitespace byte for regex-opener heuristic
+            let mut last_nws: u8 = b';';
             while j < len {
                 let b = bytes[j];
+
+                // Inside regex — skip until closing `/`
+                if in_regex {
+                    if b == b'\\' { j += 2; continue; }
+                    if b == b'/' { in_regex = false; }
+                    j += 1;
+                    continue;
+                }
 
                 match in_string {
                     Some(_) if b == b'\\' => { j += 2; continue; }
@@ -201,8 +317,22 @@ impl Rule for HashSyntax {
                     Some(_) => { j += 1; continue; }
                     None if b == b'"' || b == b'\'' => { in_string = Some(b); j += 1; continue; }
                     None if b == b'#' => break,
+                    None if b == b'/' => {
+                        // Regex opener heuristic: `/` starts regex when preceded by
+                        // operator-like char (=, (, ,, [, {, !, ~, |, keyword end)
+                        let is_regex_open = matches!(last_nws,
+                            b'=' | b'(' | b',' | b'[' | b'{' | b'!' | b'~'
+                            | b'&' | b'|' | b'<' | b'>' | b'+' | b'-' | b':' | b';'
+                        );
+                        if is_regex_open {
+                            in_regex = true;
+                            j += 1;
+                            continue;
+                        }
+                    }
                     None => {}
                 }
+                if !b.is_ascii_whitespace() { last_nws = b; }
 
                 // Look for `:symbol =>` pattern: starts with `:` followed by word chars then ` =>`
                 // Skip `::` namespace separators — the second `:` of `::` is not a symbol literal.
@@ -229,13 +359,15 @@ impl Rule for HashSyntax {
                             // Before flagging, look ahead for non-symbol rocket keys in
                             // subsequent lines of the same hash (handles mixed-key hashes
                             // where symbol keys appear before string keys).
-                            let line_ends_with_comma = line.trim_end().trim_end_matches(|c: char| c == '#' || c.is_alphanumeric() || c == '"' || c == '\'' || c == '_' || c == ' ').is_empty()
-                                || {
-                                    let te = line.trim_end();
-                                    // Strip trailing comment
-                                    let code = if let Some(p) = te.rfind(" #") { &te[..p] } else { te };
-                                    code.trim_end().ends_with(',')
-                                };
+                            // Trigger lookahead if line ends with `,`, `(`, `\`, or `=>`
+                            // (multiline key=>value where value is on next line).
+                            let line_ends_with_comma = {
+                                let te = line.trim_end();
+                                let code = if let Some(p) = te.rfind(" #") { &te[..p] } else { te };
+                                let code = code.trim_end();
+                                code.ends_with(',') || code.ends_with('(')
+                                    || code.ends_with("\\") || code.ends_with("=>")
+                            };
                             if line_ends_with_comma && lookahead_has_mixed_key(&ctx.lines, i + 1, 10) {
                                 // This is a symbol-rocket key in a mixed-key hash — skip.
                                 j = m + 2;

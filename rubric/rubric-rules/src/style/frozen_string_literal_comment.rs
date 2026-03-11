@@ -8,9 +8,15 @@ impl Rule for FrozenStringLiteralComment {
     }
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
-        let has_comment = ctx
-            .lines
-            .first()
+        // RuboCop allows the comment on line 2 when line 1 is a shebang or encoding comment.
+        let mut idx = 0;
+        if let Some(first) = ctx.lines.first() {
+            let t = first.trim();
+            if t.starts_with("#!") || t.starts_with("# encoding:") || t.starts_with("# -*- encoding") {
+                idx = 1;
+            }
+        }
+        let has_comment = ctx.lines.get(idx)
             .map(|l| l.trim() == "# frozen_string_literal: true")
             .unwrap_or(false);
         if !has_comment {
