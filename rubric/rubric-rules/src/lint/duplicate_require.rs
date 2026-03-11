@@ -40,20 +40,26 @@ impl Rule for DuplicateRequire {
                 continue;
             }
 
-            if let Some(key) = extract_require_key(trimmed) {
-                if !seen.insert(key.clone()) {
-                    let indent = line.len() - trimmed.len();
-                    let line_start = ctx.line_start_offsets[i] as usize;
-                    let pos = (line_start + indent) as u32;
-                    diags.push(Diagnostic {
-                        rule: self.name(),
-                        message: format!(
-                            "Duplicate `require` for `{}`.",
-                            key.splitn(2, ':').nth(1).unwrap_or(&key)
-                        ),
-                        range: TextRange::new(pos, pos + trimmed.len() as u32),
-                        severity: Severity::Warning,
-                    });
+            // Only track file-level requires (indent == 0). Requires inside
+            // method/block bodies are scoped to that method — rubocop resets
+            // the seen set per scope via AST, so we approximate by only checking
+            // top-level (unindented) calls.
+            let indent = line.len() - trimmed.len();
+            if indent == 0 {
+                if let Some(key) = extract_require_key(trimmed) {
+                    if !seen.insert(key.clone()) {
+                        let line_start = ctx.line_start_offsets[i] as usize;
+                        let pos = line_start as u32;
+                        diags.push(Diagnostic {
+                            rule: self.name(),
+                            message: format!(
+                                "Duplicate `require` for `{}`.",
+                                key.splitn(2, ':').nth(1).unwrap_or(&key)
+                            ),
+                            range: TextRange::new(pos, pos + trimmed.len() as u32),
+                            severity: Severity::Warning,
+                        });
+                    }
                 }
             }
         }
@@ -74,6 +80,11 @@ fn extract_require_key(line: &str) -> Option<String> {
                 || (rest.starts_with('"') && rest.ends_with('"'))
             {
                 let path = &rest[1..rest.len() - 1];
+                // Skip dynamic paths with string interpolation — rubocop uses
+                // AST and won't consider two interpolated strings equal.
+                if path.contains("#{") {
+                    return None;
+                }
                 let kind = prefix.trim_end();
                 return Some(format!("{}:{}", kind, path));
             }
