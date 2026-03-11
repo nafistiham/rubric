@@ -118,7 +118,47 @@ fn classify_opener(t: &str) -> (bool, bool) {
         }
     }
 
+    // Inline `begin` at end of line — e.g. `@cache ||= begin` or `result = begin`.
+    // These open a `begin...end` block that requires a matching `end`.
+    if t.ends_with(" begin") {
+        return (true, false);
+    }
+
+    // Inline assignment block openers: `foo = if cond`, `@x ||= case val`, etc.
+    // The keyword immediately follows an assignment operator (`=`, `||=`, `&&=`, etc.)
+    // and starts a block that requires a matching `end`.
+    if has_assignment_block_opener(t) {
+        return (true, false);
+    }
+
     (false, false)
+}
+
+/// Returns `true` when the line contains an assignment followed immediately by
+/// a block-opening keyword (`if`, `unless`, `case`, `begin`), e.g.:
+///   `@x ||= if condition`
+///   `named_route = case value`
+///
+/// These are NOT detected by `starts_with` checks because the keyword is
+/// not at the beginning of the line, yet they DO require a matching `end`.
+fn has_assignment_block_opener(t: &str) -> bool {
+    for kw in &[" if ", " unless ", " case ", " begin "] {
+        // For " begin " we also check the end-of-line form separately,
+        // so here we only match the mid-line form (" begin ").
+        if let Some(kw_pos) = t.find(kw) {
+            let before = t[..kw_pos].trim_end();
+            if before.ends_with('=')
+                && !before.ends_with("==")
+                && !before.ends_with("!=")
+                && !before.ends_with("<=")
+                && !before.ends_with(">=")
+                && !before.ends_with("=>")
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Try to extract a heredoc marker from the line.
@@ -166,8 +206,13 @@ impl Rule for DuplicateMethods {
         let n = lines.len();
 
         // Each stack frame: (seen_methods, depth, isolates_namespace)
+        // seen_methods maps method_name → (first_line, is_conditional).
+        // is_conditional = true when the method was defined inside a conditional frame
+        // (if/unless/while/begin etc.) rather than directly in the isolating scope.
+        // Two conditional definitions never flag each other — they may be in mutually
+        // exclusive branches (if/else, begin/rescue).
         // Bottom frame: the file scope. depth = -1 (sentinel: never popped). isolates = true.
-        let mut stack: Vec<(HashMap<String, usize>, i64, bool)> =
+        let mut stack: Vec<(HashMap<String, (usize, bool)>, i64, bool)> =
             vec![(HashMap::new(), -1i64, true)];
 
         // Heredoc state: if Some(marker), we're inside a heredoc body and skip until marker.
@@ -202,6 +247,32 @@ impl Rule for DuplicateMethods {
                 stack.push((HashMap::new(), 1i64, isolates));
             }
 
+
+            // --- Brace-block isolating scope: Class.new { }, Module.new { }, Struct.new { } ---
+            // These open a new class scope using `{...}` (not `do...end`), so they are
+            // not detected by `classify_opener`. We push an isolating frame with depth = -2
+            // (a sentinel distinct from -1 = file scope) that is skipped by the `end` loop
+            // and closed when `}` appears at the start of a line.
+            const BRACE_FRAME_DEPTH: i64 = -2;
+            let brace_text = t;
+            let opens_brace_scope = (brace_text.contains("Class.new")
+                || brace_text.contains("Module.new")
+                || brace_text.contains("Struct.new"))
+                && brace_text.contains('{')
+                && {
+                    let open_count = brace_text.chars().filter(|&c| c == '{').count();
+                    let close_count = brace_text.chars().filter(|&c| c == '}').count();
+                    open_count > close_count
+                };
+            if opens_brace_scope {
+                stack.push((HashMap::new(), BRACE_FRAME_DEPTH, true));
+            }
+
+            // Close brace scope when `}` appears at the start of the trimmed line.
+            if t.starts_with('}') && stack.last().map(|f| f.1) == Some(BRACE_FRAME_DEPTH) {
+                stack.pop();
+            }
+
             // --- Record/check `def` method name ---
             if trimmed.starts_with("def ") {
                 let after_def = &trimmed["def ".len()..];
@@ -230,22 +301,34 @@ impl Rule for DuplicateMethods {
                             .find(|&idx| stack[idx].2);
 
                         if let Some(idx) = isolating_idx {
-                            if let Some(&first_line) = stack[idx].0.get(method_name) {
-                                let indent = lines[i].len() - trimmed.len();
-                                let line_start = ctx.line_start_offsets[i] as usize;
-                                let pos = (line_start + indent) as u32;
-                                diags.push(Diagnostic {
-                                    rule: self.name(),
-                                    message: format!(
-                                        "Duplicate method `{}` (first defined at line {}).",
-                                        method_name,
-                                        first_line + 1
-                                    ),
-                                    range: TextRange::new(pos, pos + trimmed.len() as u32),
-                                    severity: Severity::Warning,
-                                });
+                            // A method is "conditional" when there are intermediate non-isolating
+                            // frames between the isolating scope and the def frame.  Such defs
+                            // may live in mutually exclusive branches (if/else, begin/rescue),
+                            // so two conditional defs with the same name are NOT flagged.
+                            let is_conditional = len.saturating_sub(2) > idx;
+
+                            if let Some(&(first_line, first_is_conditional)) =
+                                stack[idx].0.get(method_name)
+                            {
+                                // Only flag when the FIRST definition was unconditional.
+                                // If both are conditional they might be in separate if/else branches.
+                                if !first_is_conditional {
+                                    let indent = lines[i].len() - trimmed.len();
+                                    let line_start = ctx.line_start_offsets[i] as usize;
+                                    let pos = (line_start + indent) as u32;
+                                    diags.push(Diagnostic {
+                                        rule: self.name(),
+                                        message: format!(
+                                            "Duplicate method `{}` (first defined at line {}).",
+                                            method_name,
+                                            first_line + 1
+                                        ),
+                                        range: TextRange::new(pos, pos + trimmed.len() as u32),
+                                        severity: Severity::Warning,
+                                    });
+                                }
                             } else {
-                                stack[idx].0.insert(method_name.to_string(), i);
+                                stack[idx].0.insert(method_name.to_string(), (i, is_conditional));
                             }
                         }
                     }

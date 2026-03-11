@@ -205,8 +205,10 @@ fn opens_other_block(t: &str) -> bool {
     if has_do_params_block(t) {
         return true;
     }
-    // ` do #` / ` do;` — do-block with immediate comment or statement
-    if t.contains(" do #") || t.contains(" do;") {
+    // ` do #` / ` do;` — do-block with immediate comment or statement.
+    // Use string-aware check to avoid matching ` do;` inside string literals
+    // (e.g. `app_file "name", "Rails.routes.draw do; end"` — the `do;` is inside a string).
+    if contains_outside_string(t, " do #") || contains_outside_string(t, " do;") {
         return true;
     }
 
