@@ -141,6 +141,7 @@ impl Rule for ElseAlignment {
                     || t == "def"
                     || t == "begin"
                     || t.starts_with("begin ")
+                    || t.ends_with(" begin")  // e.g. `@x ||= begin`
                     || t.starts_with("while ")
                     || t.starts_with("until ")
                     || t.starts_with("class ")

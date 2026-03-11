@@ -85,6 +85,42 @@ impl Rule for AmbiguousOperator {
                     None => {}
                 }
 
+                // ── Skip percent literals (contents are not Ruby expressions) ──
+                if b == b'%' && j + 1 < len {
+                    let mut k = j + 1;
+                    if k < len && bytes[k].is_ascii_alphabetic() { k += 1; }
+                    if k < len {
+                        let open = bytes[k];
+                        let (close, is_bracket) = match open {
+                            b'{' => (b'}', true),
+                            b'(' => (b')', true),
+                            b'[' => (b']', true),
+                            b'<' => (b'>', true),
+                            b if b.is_ascii_punctuation() => (b, false),
+                            _ => { j += 1; continue; }
+                        };
+                        j = k + 1;
+                        if is_bracket {
+                            let mut depth = 1usize;
+                            while j < len && depth > 0 {
+                                match bytes[j] {
+                                    b'\\' => { j += 2; }
+                                    c if c == open => { depth += 1; j += 1; }
+                                    c if c == close => { depth -= 1; j += 1; }
+                                    _ => { j += 1; }
+                                }
+                            }
+                        } else {
+                            while j < len {
+                                if bytes[j] == b'\\' { j += 2; continue; }
+                                if bytes[j] == close { j += 1; break; }
+                                j += 1;
+                            }
+                        }
+                        continue;
+                    }
+                }
+
                 // Look for ` *word` or ` &word` pattern (space before * or & then word char)
                 if b == b' ' && j + 2 < len {
                     let next = bytes[j + 1];

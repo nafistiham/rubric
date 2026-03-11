@@ -153,6 +153,20 @@ impl Rule for SpaceInsideHashLiteralBraces {
                             match bytes[j] {
                                 b'\\' => { j += 2; }
                                 b'/' => { closed = true; j += 1; break; }
+                                // Skip #{...} interpolation inside regex so inner `/`
+                                // doesn't prematurely close the outer regex.
+                                b'#' if j + 1 < len && bytes[j + 1] == b'{' => {
+                                    j += 2;
+                                    let mut depth = 1usize;
+                                    while j < len && depth > 0 {
+                                        match bytes[j] {
+                                            b'\\' => { j += 2; }
+                                            b'{' => { depth += 1; j += 1; }
+                                            b'}' => { depth -= 1; j += 1; }
+                                            _ => { j += 1; }
+                                        }
+                                    }
+                                }
                                 _ => { j += 1; }
                             }
                         }
@@ -205,8 +219,9 @@ impl Rule for SpaceInsideHashLiteralBraces {
                         j += 1;
                         continue;
                     }
-                    // Flag if prev char is not a space
-                    if prev != b' ' && prev != 0 {
+                    // Flag if prev char is not a space.
+                    // Also skip `}` preceded by another `}` (consecutive block closes like `}}`).
+                    if prev != b' ' && prev != 0 && prev != b'}' {
                         let pos = (line_start + j) as u32;
                         diags.push(Diagnostic {
                             rule: self.name(),

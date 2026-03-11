@@ -30,8 +30,22 @@ impl Rule for SpaceAroundEqualsInParameterDefault {
             let n = bytes.len();
             let mut pos = paren_start + 1;
             let mut depth = 1usize;
+            let mut in_string: Option<u8> = None;
 
             while pos < n && depth > 0 {
+                // ── String literal tracking ──────────────────────────────────
+                if let Some(delim) = in_string {
+                    if bytes[pos] == b'\\' { pos += 2; continue; }
+                    if bytes[pos] == delim { in_string = None; }
+                    pos += 1;
+                    continue;
+                }
+                if bytes[pos] == b'"' || bytes[pos] == b'\'' {
+                    in_string = Some(bytes[pos]);
+                    pos += 1;
+                    continue;
+                }
+
                 match bytes[pos] {
                     b'(' => { depth += 1; pos += 1; }
                     b')' => { depth -= 1; pos += 1; }

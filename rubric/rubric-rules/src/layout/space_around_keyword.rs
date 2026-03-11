@@ -55,9 +55,17 @@ impl Rule for SpaceAroundKeyword {
                         let pb = bytes[j - 1];
                         !pb.is_ascii_alphanumeric() && pb != b'_' && pb != b'.'
                     };
+                    // Skip if preceded by `def ` — keyword used as a method name
+                    // (e.g. `def not(...)`, `def and(...)`, `def in(...)`)
+                    let preceded_by_def = {
+                        let mut p = j;
+                        while p > 0 && (bytes[p - 1] == b' ' || bytes[p - 1] == b'\t') { p -= 1; }
+                        p >= 3 && &bytes[p - 3..p] == b"def"
+                            && (p == 3 || bytes[p - 4] == b' ' || bytes[p - 4] == b'\t')
+                    };
                     // Keyword immediately followed by `(`
                     let after_pos = j + kw_len;
-                    if before_ok && after_pos < len && bytes[after_pos] == b'(' {
+                    if before_ok && !preceded_by_def && after_pos < len && bytes[after_pos] == b'(' {
                         let kw_start = line_start + j as u32;
                         let kw_end = kw_start + kw_len as u32;
                         diags.push(Diagnostic {
