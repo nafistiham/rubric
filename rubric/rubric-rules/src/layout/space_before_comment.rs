@@ -7,13 +7,15 @@ pub struct SpaceBeforeComment;
 /// An "inline comment" is a `#` that:
 ///   1. Is NOT inside a string literal (`"..."`, `'...'`)
 ///   2. Is NOT inside a percent literal (`%r{...}`, `%w(...)`, etc.)
-///   3. Is NOT a `#{...}` string interpolation opener
-///   4. IS followed by a space or end of line (distinguishes `# comment` from
+///   3. Is NOT inside a `/regex/` literal
+///   4. Is NOT a `#{...}` string interpolation opener
+///   5. IS followed by a space or end of line (distinguishes `# comment` from
 ///      bare `#` in contexts like `Array#length` documentation, `#!` shebangs, etc.)
 fn find_inline_comment(bytes: &[u8]) -> Option<usize> {
     let n = bytes.len();
     let mut i = 0;
     let mut in_string: Option<u8> = None;
+    let mut in_regex = false;
     // Percent-literal state: (close_byte, depth).
     // For brace-style delimiters ({, (, [, <) depth is tracked.
     // For same-char delimiters (|, !, /, ...) depth is irrelevant; any occurrence of
@@ -37,6 +39,19 @@ fn find_inline_comment(bytes: &[u8]) -> Option<usize> {
             }
             if b == q {
                 in_string = None;
+            }
+            i += 1;
+            continue;
+        }
+
+        // ── Inside a /regex/ literal ───────────────────────────────────────
+        if in_regex {
+            if b == b'\\' && i + 1 < n {
+                i += 2;
+                continue;
+            }
+            if b == b'/' {
+                in_regex = false;
             }
             i += 1;
             continue;
@@ -70,6 +85,15 @@ fn find_inline_comment(bytes: &[u8]) -> Option<usize> {
                 in_string = Some(b);
                 i += 1;
             }
+            b'/' => {
+                // Treat as regex opener when preceded by `=`, `(`, `,`, `[`, `|`,
+                // space/tab, or at the start of non-whitespace content.
+                let prev = if i > 0 { bytes[i - 1] } else { 0 };
+                if matches!(prev, b'=' | b'(' | b',' | b'[' | b'|' | b' ' | b'\t' | 0) {
+                    in_regex = true;
+                }
+                i += 1;
+            }
             b'%' if i + 1 < n => {
                 // Detect percent literals (%r, %q, %Q, %w, %W, %i, %I, %s, %x, %()).
                 let mut k = i + 1;
@@ -97,7 +121,14 @@ fn find_inline_comment(bytes: &[u8]) -> Option<usize> {
                 // This excludes `Array#length`, `#!` shebangs, `#{}` (handled above), etc.
                 let next = bytes.get(i + 1).copied();
                 if next == Some(b' ') || next.is_none() || next == Some(b'\t') {
-                    return Some(i);
+                    // Backtrack to the first `#` in a consecutive `###...` run so that
+                    // `check_source` checks spacing before the whole comment token, not
+                    // just the last `#` in a `##` / `###` sequence.
+                    let mut start = i;
+                    while start > 0 && bytes[start - 1] == b'#' {
+                        start -= 1;
+                    }
+                    return Some(start);
                 }
                 // Not a comment marker — continue scanning.
                 i += 1;

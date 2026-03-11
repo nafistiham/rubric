@@ -103,37 +103,42 @@ impl Rule for SpaceInsideHashLiteralBraces {
                     None => {}
                 }
 
-                // Skip %r{...}, %q{...}, %Q{...}, %w{...}, %W{...}, %i{...}, %I{...} etc.
-                // Also skip bare %{...} (equivalent to %Q{...})
-                let is_percent_lit = j + 1 < len && matches!(bytes[j + 1], b'r' | b'q' | b'Q' | b'w' | b'W' | b'i' | b'I' | b's' | b'x');
-                let is_bare_percent = j + 1 < len && bytes[j + 1] == b'{';
-                if b == b'%' && (is_percent_lit || is_bare_percent) {
-                    if is_bare_percent { j += 1; } else { j += 2; }
-                    if j < len {
-                        let delim = bytes[j];
-                        j += 1;
-                        if delim == b'{' {
-                            let mut depth = 1usize;
-                            while j < len && depth > 0 {
-                                match bytes[j] {
-                                    b'\\' => { j += 2; }
-                                    b'{' => { depth += 1; j += 1; }
-                                    b'}' => { depth -= 1; j += 1; }
-                                    _ => { j += 1; }
-                                }
-                            }
-                            if depth > 0 {
-                                in_percent_regex = true;
-                                percent_regex_depth = depth - 1;
-                            }
-                        } else {
-                            while j < len && bytes[j] != delim {
-                                if bytes[j] == b'\\' { j += 2; } else { j += 1; }
-                            }
-                            if j < len { j += 1; }
-                        }
+                // Skip percent literals: %r{...}, %q(...), %Q[...], %w{...}, %(...)
+                // etc.  The type letter is optional for %( / %{ / %[ / %<.
+                // We detect: `%` followed by optional type letter, then a bracket.
+                if b == b'%' && j + 1 < len {
+                    let mut k = j + 1;
+                    // Optional type letter
+                    if k < len && matches!(bytes[k], b'r' | b'q' | b'Q' | b'w' | b'W' | b'i' | b'I' | b's' | b'x') {
+                        k += 1;
                     }
-                    continue;
+                    if k < len && matches!(bytes[k], b'{' | b'(' | b'[' | b'<' | b'|' | b'!' | b'/' | b'^') {
+                        let open_delim = bytes[k];
+                        let close_delim = match open_delim {
+                            b'{' => b'}',
+                            b'(' => b')',
+                            b'[' => b']',
+                            b'<' => b'>',
+                            other => other, // same-char delimiters
+                        };
+                        let brace_style = close_delim != open_delim;
+                        j = k + 1; // advance past the opening delimiter
+                        let mut depth = 1usize;
+                        while j < len && depth > 0 {
+                            match bytes[j] {
+                                b'\\' => { j += 2; }
+                                c if brace_style && c == open_delim => { depth += 1; j += 1; }
+                                c if c == close_delim => { depth -= 1; j += 1; }
+                                _ => { j += 1; }
+                            }
+                        }
+                        if depth > 0 && open_delim == b'{' {
+                            // Unclosed brace-style — multiline percent literal
+                            in_percent_regex = true;
+                            percent_regex_depth = depth - 1;
+                        }
+                        continue;
+                    }
                 }
 
                 // Skip /regex/ literals

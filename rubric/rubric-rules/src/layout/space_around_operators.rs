@@ -76,26 +76,48 @@ impl Rule for SpaceAroundOperators {
                 continue;
             }
 
-            // Skip lines inside a multiline %r{...} literal.
-            if let Some((close, ref mut depth)) = in_multiline_percent_regex {
-                let open = match close { b')' => b'(', b']' => b'[', b'}' => b'{', b'>' => b'<', c => c };
+            // Skip lines inside a multiline percent literal (%r{}, %r//, %{}, %() etc.).
+            // depth == 0 encodes a same-char (symmetric) delimiter such as %r//;
+            // depth > 0 encodes a bracket-style delimiter with its current nesting depth.
+            if let Some((close, depth)) = in_multiline_percent_regex {
                 let bytes = line.as_bytes();
                 let mut k = 0;
-                while k < bytes.len() {
-                    match bytes[k] {
-                        b'\\' => { k += 2; }
-                        c if c == open => { *depth += 1; k += 1; }
-                        c if c == close => {
-                            *depth -= 1;
-                            k += 1;
-                            if *depth == 0 { break; }
+                let new_state = if depth == 0 {
+                    // Same-char delimiter — scan until first unescaped close char.
+                    let mut found = false;
+                    while k < bytes.len() {
+                        match bytes[k] {
+                            b'\\' => { k += 2; }
+                            c if c == close => { found = true; k += 1; break; }
+                            _ => { k += 1; }
                         }
-                        _ => { k += 1; }
                     }
-                }
-                if *depth == 0 {
-                    in_multiline_percent_regex = None;
-                }
+                    if found { None } else { Some((close, 0usize)) }
+                } else {
+                    // Bracket-style delimiter — track nesting depth.
+                    let open = match close {
+                        b')' => b'(',
+                        b']' => b'[',
+                        b'}' => b'{',
+                        b'>' => b'<',
+                        _ => 0,
+                    };
+                    let mut d = depth;
+                    while k < bytes.len() {
+                        match bytes[k] {
+                            b'\\' => { k += 2; }
+                            c if open != 0 && c == open => { d += 1; k += 1; }
+                            c if c == close => {
+                                d -= 1;
+                                k += 1;
+                                if d == 0 { break; }
+                            }
+                            _ => { k += 1; }
+                        }
+                    }
+                    if d == 0 { None } else { Some((close, d)) }
+                };
+                in_multiline_percent_regex = new_state;
                 continue;
             }
 
@@ -149,7 +171,9 @@ impl Rule for SpaceAroundOperators {
 
                 // ── Skip percent literals: %r{}, %w[], %i[], %(str), %q(), %Q() ──
                 // Also handles backtick strings as a special case below.
-                if b == b'%' && j + 1 < len && in_string.is_none() {
+                // Guard: must NOT be inside a regex (to avoid treating `%>` inside a
+                // regex literal as a percent literal opener).
+                if b == b'%' && j + 1 < len && in_string.is_none() && !in_regex {
                     let next_b = bytes[j+1];
                     // Determine delimiter: skip optional type char (r, w, W, i, I, q, Q, x)
                     let (type_skip, delim_pos) = match next_b {
@@ -174,7 +198,13 @@ impl Rule for SpaceAroundOperators {
                                 while j < len && bytes[j] != close {
                                     if bytes[j] == b'\\' { j += 2; } else { j += 1; }
                                 }
-                                if j < len { j += 1; }
+                                if j < len {
+                                    j += 1; // consumed the closing delimiter
+                                } else {
+                                    // Unclosed on this line — multiline literal
+                                    in_multiline_percent_regex = Some((close, 0)); // 0 = same-char sentinel
+                                    break;
+                                }
                             } else {
                                 // Bracket delimiter: track depth
                                 let mut depth = 1usize;
@@ -186,13 +216,13 @@ impl Rule for SpaceAroundOperators {
                                         _ => { j += 1; }
                                     }
                                 }
-                                // If we reached end of line without closing:
+                                // If we reached end of line without closing, track multiline state.
                                 // - %w/%W/%i/%I → word array (no operator scanning)
-                                // - %r → regex literal (no operator scanning)
+                                // - anything else → generic multiline percent literal
                                 if depth > 0 {
                                     if matches!(next_b, b'w' | b'W' | b'i' | b'I') {
                                         in_percent_word_array = true;
-                                    } else if next_b == b'r' {
+                                    } else {
                                         in_multiline_percent_regex = Some((close, depth));
                                     }
                                     break;
@@ -352,6 +382,15 @@ impl Rule for SpaceAroundOperators {
                             j += 2;
                             continue;
                         }
+                        // Skip operator method definitions: `def ==(other)`, `def !=(other)`
+                        // The operator is the method name — not an infix expression.
+                        if matches!(two, b"==" | b"!=" | b"<=" | b">=") {
+                            let before = line[..j].trim_end();
+                            if before.ends_with("def") {
+                                j += 2;
+                                continue;
+                            }
+                        }
                         let prev_ok = j == 0 || bytes[j-1] == b' ' || bytes[j-1] == b'\t';
                         let next_ok = j + 2 >= len || bytes[j+2] == b' ' || bytes[j+2] == b'\t' || bytes[j+2] == b'\n';
                         if !prev_ok || !next_ok {
@@ -495,6 +534,10 @@ impl Rule for SpaceAroundOperators {
                             || prev == b'|'
                             // `-` in `<<-RUBY` heredoc sigil
                             || prev == b'<'
+                            // Unary `-` after `..` / `...` range operator (e.g. `0..-1`)
+                            || (b == b'-' && prev == b'.')
+                            // `$-I`, `$-v`, `$-w` — Ruby predefined globals
+                            || (b == b'-' && prev == b'$')
                         {
                             j += 1;
                             continue;
