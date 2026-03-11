@@ -52,13 +52,19 @@ fn is_one_liner(trimmed: &str) -> bool {
     // or nested: `class Foo; def bar; end end`
     // Any line that ends with ` end` (space before end) and has content before it.
     if bare.ends_with(" end") && bare.len() > 4 {
+        // Exclude `def end` — here `end` is the method NAME, not the block closer.
+        // E.g., `def end` defines a method named `end`; it is NOT a one-liner.
+        let before_end = &bare[..bare.len() - 4]; // strip " end"
+        if before_end == "def" || before_end.ends_with(" def") || before_end.ends_with("\tdef") {
+            return false;
+        }
         return true;
     }
     false
 }
 
 /// Strip a trailing inline comment from a line (simplified: finds the first
-/// bare `#` not inside a string literal).
+/// bare `#` not inside a string literal and not part of `#{...}` interpolation).
 fn strip_inline_comment_for_one_liner(s: &str) -> &str {
     let bytes = s.as_bytes();
     let mut in_str: Option<u8> = None;
@@ -69,7 +75,14 @@ fn strip_inline_comment_for_one_liner(s: &str) -> &str {
             Some(d) if bytes[i] == d => { in_str = None; }
             Some(_) => {}
             None if bytes[i] == b'\'' || bytes[i] == b'"' => { in_str = Some(bytes[i]); }
-            None if bytes[i] == b'#' => return &s[..i],
+            None if bytes[i] == b'#' => {
+                // `#{...}` is string interpolation, not a comment — skip over the `#`.
+                if i + 1 < bytes.len() && bytes[i + 1] == b'{' {
+                    i += 1; // skip `#`; `{` will be processed next iteration
+                } else {
+                    return &s[..i];
+                }
+            }
             None => {}
         }
         i += 1;
@@ -224,7 +237,7 @@ fn contains_assign_kw(trimmed: &str, kw: &str) -> bool {
 
     let mut i = 0;
     while i < n {
-        if bytes[i] == b'=' && (i == 0 || bytes[i - 1] != b'!' && bytes[i - 1] != b'<' && bytes[i - 1] != b'>') {
+        if bytes[i] == b'=' && (i == 0 || (bytes[i - 1] != b'!' && bytes[i - 1] != b'<' && bytes[i - 1] != b'>' && bytes[i - 1] != b']')) {
             // Skip past optional `=` in `==`, `=>`, `=~`
             if i + 1 < n && (bytes[i + 1] == b'=' || bytes[i + 1] == b'>' || bytes[i + 1] == b'~') {
                 i += 1;
@@ -255,18 +268,48 @@ fn contains_assign_kw(trimmed: &str, kw: &str) -> bool {
 /// This handles cases like `puts "cascade do |t|"` (inside string, skip) vs
 /// `.gsub(/regex/) do |match|` (outside string, detect).
 fn has_do_pattern_outside_string(trimmed: &str) -> bool {
-    for pattern in &[" do |", " do|", " do #", " do;"] {
+    for pattern in &[" do |", " do|"] {
         if let Some(pos) = trimmed.rfind(pattern) {
             let after = &trimmed[pos + pattern.len()..];
-            // Strip any trailing inline comment from the remainder
             let code_after = strip_inline_comment_for_one_liner(after);
             let bare_after = code_after.trim_end();
-            // If everything after the `do` pattern up to EOL closes with a
-            // string quote, the pattern is embedded in a string argument.
+            // If the tail ends with a string quote, the `do |` is inside a string.
+            if bare_after.ends_with('"') || bare_after.ends_with('\'') {
+                continue;
+            }
+            // For `do |params|`, check that the content after the CLOSING `|` is
+            // empty or just a comment — real block params end the line after `|`.
+            // If there's significant content after the closing `|`, the pattern is
+            // inside a regex or string (e.g. `assert_match(/...do |x| %>/, y)`).
+            if let Some(pipe_pos) = bare_after.find('|') {
+                let after_params = bare_after[pipe_pos + 1..].trim_start();
+                if !after_params.is_empty() && !after_params.starts_with('#') {
+                    continue; // content after params — inside regex/string
+                }
+            }
+            return true;
+        }
+    }
+    for pattern in &[" do #", " do;"] {
+        if let Some(pos) = trimmed.rfind(pattern) {
+            let after = &trimmed[pos + pattern.len()..];
+            let code_after = strip_inline_comment_for_one_liner(after);
+            let bare_after = code_after.trim_end();
             if bare_after.ends_with('"') || bare_after.ends_with('\'') {
                 continue;
             }
             return true;
+        }
+    }
+    // `do` followed by 2+ spaces then `#` (e.g., `foo.bar do  # comment`).
+    // The single-space case ` do #` is already handled above; this catches double-space etc.
+    if let Some(pos) = trimmed.rfind(" do") {
+        let after = &trimmed[pos + 3..];
+        if !after.is_empty() {
+            let after_trim = after.trim_start_matches(' ');
+            if after_trim.starts_with('#') {
+                return true;
+            }
         }
     }
     false
@@ -333,10 +376,18 @@ impl Rule for EndAlignment {
         // string content, not Ruby syntax.
         let mut pct_literal_depth: i32 = 0;
 
+        // Percent-regex literal tracking: when inside a multi-line `%r{...}`, skip lines
+        // since `end` inside a regex is pattern content, not a Ruby `end` keyword.
+        let mut pct_regex_depth: i32 = 0;
+
         // Continuation line tracking: if the previous non-comment, non-blank line ends
         // with `\`, the current line is a continuation and should NOT be treated as a
         // new block opener (e.g., `unless` on a continuation is not a new `unless` block).
         let mut prev_line_continues = false;
+        // Track whether the continuation line contained an assignment (`= \`, `||= \`, etc.).
+        // When true and the NEXT line starts with `if`/`unless`, that keyword opens an inline
+        // block (like `x = \ if cond`) rather than being a trailing modifier.
+        let mut prev_continuation_had_assign = false;
 
         let mut i = 0;
         while i < n {
@@ -359,6 +410,39 @@ impl Rule for EndAlignment {
                 // Fall through: the opener line itself still contains real Ruby syntax.
             }
 
+            // Skip percent-regex body lines (`%r{...}` spanning multiple lines).
+            // `end` inside a regex literal is pattern content, not a Ruby keyword.
+            if pct_regex_depth > 0 {
+                for &b in line.as_bytes() {
+                    match b {
+                        b'{' => pct_regex_depth += 1,
+                        b'}' => pct_regex_depth -= 1,
+                        _ => {}
+                    }
+                }
+                if pct_regex_depth > 0 {
+                    i += 1;
+                    continue;
+                }
+                // depth dropped to 0: fall through to process the closing line
+            }
+            // Detect multi-line %r{...} regex literals opening on this line.
+            if line.contains("%r{") {
+                let mut depth: i32 = 0;
+                let bytes = line.as_bytes();
+                let start = line.find("%r{").unwrap() + 2; // position of `{`
+                for &b in &bytes[start..] {
+                    match b {
+                        b'{' => depth += 1,
+                        b'}' => { depth -= 1; if depth == 0 { break; } }
+                        _ => {}
+                    }
+                }
+                if depth > 0 {
+                    pct_regex_depth = depth;
+                }
+            }
+
             // Skip percent-literal body lines (`%w(...)`, `%i(...)`, etc. spanning multiple lines).
             // Ruby keywords inside these literals are string content, not openers.
             if pct_literal_depth > 0 {
@@ -369,8 +453,12 @@ impl Rule for EndAlignment {
                         _ => {}
                     }
                 }
-                i += 1;
-                continue;
+                if pct_literal_depth > 0 {
+                    i += 1;
+                    continue;
+                }
+                // depth dropped to 0 on this line: fall through so that content AFTER
+                // the closing `)` (e.g. `.each do |method|`) is processed normally.
             }
             // Detect multi-line percent literals opening on this line.
             pct_literal_depth = opening_pct_literal_depth(line);
@@ -384,10 +472,22 @@ impl Rule for EndAlignment {
             // A line is a continuation if the PREVIOUS non-comment, non-blank line
             // ended with a backslash `\`.
             let is_continuation = prev_line_continues;
+            let continuation_had_assign = prev_continuation_had_assign;
 
-            // Update prev_line_continues for next iteration.
+            // Update continuation state for the next iteration.
             let bare = trimmed.trim_end();
             prev_line_continues = bare.ends_with('\\');
+            prev_continuation_had_assign = if prev_line_continues {
+                // Check if the code before `\` ends with an assignment operator.
+                let code_before = bare.trim_end_matches('\\').trim_end();
+                code_before.ends_with(" =")
+                    || code_before.ends_with("||=")
+                    || code_before.ends_with("&&=")
+                    || code_before.ends_with("+=")
+                    || code_before.ends_with("-=")
+            } else {
+                false
+            };
 
             // Detect block/construct openers at the start of the trimmed line.
             // Exclude: one-liners (`class Foo; end`), endless methods (`def foo = expr`),
@@ -399,9 +499,23 @@ impl Rule for EndAlignment {
             // that's the job of Layout/BlockAlignment. Pushing do-blocks as check=false
             // ensures their `end` tokens are consumed from the stack without generating
             // false diagnostics.
+            //
+            // Detect `do` at end of line. Use the raw `trimmed` (not comment-stripped) so
+            // that `#method` and `#<Obj>` inside regex literals are not mistaken for comment
+            // starts. False positive mitigation: if there is a ` # ` (space-hash-space)
+            // comment marker BEFORE the trailing ` do` and the comment text itself ends with
+            // ` do`, the `do` is English prose inside a comment, not a Ruby keyword.
+            let raw_do_at_end = trimmed == "do" || trimmed.ends_with(" do");
+            let is_comment_ending_do = raw_do_at_end && {
+                if let Some(hash_pos) = trimmed.rfind(" # ") {
+                    let comment_text = &trimmed[hash_pos + 3..];
+                    comment_text.ends_with(" do") || comment_text == "do"
+                } else {
+                    false
+                }
+            };
             let is_do_block = !is_continuation && !is_one_liner(trimmed) && (
-                trimmed == "do"
-                || trimmed.ends_with(" do")
+                (raw_do_at_end && !is_comment_ending_do)
                 // Use string-aware scan for "do |", "do|", "do #", "do;" patterns so that
                 // these substrings inside string literals (e.g. `puts "cascade do |t|"`)
                 // do not falsely trigger a do-block frame.
@@ -413,6 +527,16 @@ impl Rule for EndAlignment {
                 || trimmed.starts_with("private def ") || trimmed.starts_with("protected def ")
                 || trimmed.starts_with("private_class_method def ") || trimmed.starts_with("public_class_method def ")
                 || trimmed.starts_with("module_function def ")
+                // Any single-word modifier before `def`: `helper_method def`, `memoize def`, etc.
+                // Detected by: word chars only before " def " (no spaces/operators in the modifier).
+                || {
+                    let is_modifier_def = if let Some(p) = trimmed.find(" def ") {
+                        trimmed[..p].chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    } else {
+                        false
+                    };
+                    is_modifier_def
+                }
                 || trimmed.starts_with("class ") || trimmed.starts_with("module ")
                 || trimmed.starts_with("if ") || trimmed.starts_with("unless ")
                 || trimmed.starts_with("while ") || trimmed.starts_with("until ")
@@ -433,19 +557,23 @@ impl Rule for EndAlignment {
             //   `test "very long name" \` + `"cont" do` — multi-line method call with do-block
             // Rubocop does not check end alignment for these because the block is part of a
             // wrapped expression.
-            // When the previous line ends with `\` (backslash continuation) and the current
-            // line opens a NEW block that needs a matching `end`, track it as check=false.
             //
-            // NOTE: `if`/`unless` are NOT included here because on continuation lines they
-            // act as trailing modifiers (e.g., `raise 'error' \` + `unless cond`), not as
-            // block openers. Only `case`, `begin`, and `do`-blocks can unambiguously open a
-            // new block on a continuation line.
+            // `if`/`unless` are included ONLY when the previous continuation line contained
+            // an assignment operator (`= \`, `||= \`, etc.), which indicates the keyword
+            // opens an inline block expression (not a trailing modifier like `raise ... \
+            //   unless cond`).
             let is_continuation_keyword = is_continuation && !is_one_liner(trimmed) && (
                 trimmed.starts_with("case ") || trimmed == "case"
                 || trimmed == "begin" || trimmed.starts_with("begin ")
                 // Continuation line ending with `do` — method call split across lines with `\`
-                || trimmed.ends_with(" do")
+                || (raw_do_at_end && !is_comment_ending_do)
                 || has_do_pattern_outside_string(trimmed)
+                // `if`/`unless` on a continuation from an assignment line open inline blocks:
+                // `x = \` + `  if cond` — the `if` is part of the `= if cond ... end` expression.
+                || (continuation_had_assign && (
+                    trimmed.starts_with("if ") || trimmed == "if"
+                    || trimmed.starts_with("unless ") || trimmed == "unless"
+                ))
             );
 
             if is_keyword_opener {
