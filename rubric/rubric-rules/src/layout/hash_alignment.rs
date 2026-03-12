@@ -47,33 +47,55 @@ fn spaces_before(line: &str, pos: usize) -> usize {
 ///
 /// This allows `table`-style hashes where all `=>` are aligned to the same
 /// column, while still flagging lone misaligned rockets.
+/// Returns true if a trimmed line is just a hash/array/paren closer (no key/value).
+/// Examples: `},`, `}`, `],`, `]`, `),`, `)`, `}.freeze`, `},\n` etc.
+fn is_closer_line(trimmed: &str) -> bool {
+    let t = trimmed.trim_end_matches(|c: char| c == ',' || c == ';' || c.is_ascii_whitespace());
+    let t = t.trim_end_matches(|c: char| c.is_ascii_alphabetic() || c == '_' || c == '.' || c == '(')
+             .trim_end_matches(|c: char| c == ',' || c == ';' || c.is_ascii_whitespace());
+    // After removing trailing decorations, if what's left is only closing brackets → closer
+    t.chars().all(|c| matches!(c, '}' | ']' | ')' | '>' | '#' | ' ' | '\t'))
+        && !t.is_empty()
+}
+
 fn is_table_aligned(rockets: &[Option<usize>], lines: &[&str], idx: usize, rocket_pos: usize) -> bool {
     let n = rockets.len();
+    let my_indent = lines[idx].len() - lines[idx].trim_start().len();
 
     // Search backward
     let start = if idx > 15 { idx - 15 } else { 0 };
     for k in (start..idx).rev() {
-        let line = lines[k].trim();
-        if line.is_empty() || line.starts_with('#') {
+        let line = lines[k];
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
+        let k_indent = line.len() - line.trim_start().len();
         match rockets[k] {
-            Some(p) if p == rocket_pos => return true,
-            Some(_) => break, // different rocket column — not the same group
-            None => break,    // no rocket on this line — group boundary
+            Some(p) if p == rocket_pos => return true, // same column — part of group
+            Some(_) if k_indent > my_indent => continue, // inner scope, different col — skip
+            Some(_) => break, // same or outer scope, different column — not same group
+            None if k_indent > my_indent => continue, // continuation/value line — skip
+            None if is_closer_line(trimmed) => continue, // closer line — skip
+            None => break, // group boundary at same/outer scope
         }
     }
 
     // Search forward
     let end = (idx + 16).min(n);
     for k in (idx + 1)..end {
-        let line = lines[k].trim();
-        if line.is_empty() || line.starts_with('#') {
+        let line = lines[k];
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
+        let k_indent = line.len() - line.trim_start().len();
         match rockets[k] {
             Some(p) if p == rocket_pos => return true,
+            Some(_) if k_indent > my_indent => continue,
             Some(_) => break,
+            None if k_indent > my_indent => continue,
+            None if is_closer_line(trimmed) => continue,
             None => break,
         }
     }
