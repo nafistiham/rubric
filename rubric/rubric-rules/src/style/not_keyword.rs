@@ -96,6 +96,46 @@ impl Rule for NotKeyword {
                         continue;
                     }
                     None if b == b'#' => break, // comment — stop scanning this line
+                    // Percent literals: %r!...!, %(str), %w(...) etc.
+                    // Skip the entire literal content so `not` inside is not flagged.
+                    None if b == b'%' && j + 1 < len => {
+                        let mut k = j + 1;
+                        // Skip optional type sigil (r, q, Q, w, W, i, I, s, x)
+                        if k < len && bytes[k].is_ascii_alphabetic() { k += 1; }
+                        if k < len {
+                            let open = bytes[k];
+                            let close = match open {
+                                b'(' => b')',
+                                b'[' => b']',
+                                b'{' => b'}',
+                                b'<' => b'>',
+                                c if c.is_ascii_punctuation() => c, // same-char
+                                _ => { last_non_space = b; j += 1; continue; }
+                            };
+                            k += 1; // skip opening delimiter
+                            if open == close {
+                                // Same-char delimiter: scan until unescaped close
+                                while k < len {
+                                    if bytes[k] == b'\\' { k += 2; continue; }
+                                    if bytes[k] == close { k += 1; break; }
+                                    k += 1;
+                                }
+                            } else {
+                                // Bracket-style: depth-tracked
+                                let mut depth = 1usize;
+                                while k < len && depth > 0 {
+                                    if bytes[k] == b'\\' { k += 2; continue; }
+                                    if bytes[k] == open { depth += 1; }
+                                    else if bytes[k] == close { depth -= 1; }
+                                    k += 1;
+                                }
+                            }
+                            j = k;
+                            last_non_space = close;
+                            continue;
+                        }
+                        last_non_space = b; j += 1; continue;
+                    }
                     None => {}
                 }
 

@@ -41,10 +41,10 @@ impl Rule for SpaceAroundOperators {
         let mut diags = Vec::new();
         // Cross-line heredoc tracking: Some(terminator) while inside a heredoc body.
         let mut in_heredoc: Option<String> = None;
-        // Cross-line percent-word-array tracking: true while inside %w[...], %W[...],
-        // %i[...], %I[...] that spans multiple lines. Lines inside are plain word tokens —
-        // no operator scanning applies.
-        let mut in_percent_word_array = false;
+        // Cross-line percent-word-array tracking: Some(close_byte) while inside %w[...],
+        // %w(...), %W[...], %i[...], %I[...] that spans multiple lines.
+        // Lines inside are plain word tokens — no operator scanning applies.
+        let mut in_percent_word_array: Option<u8> = None;
         // Cross-line multiline /regex/ tracking: true when a /regex/ started on a
         // previous line and hasn't been closed yet.
         let mut in_multiline_regex = false;
@@ -155,11 +155,11 @@ impl Rule for SpaceAroundOperators {
             // the inner `"` starts a new string within the #{...} block).
             let mut in_nested_string: Option<u8> = None;
 
-            // If we are inside a multiline %w/%W/%i/%I array, scan for the closing `]`
-            // to end the context, then skip operator checking for this line.
-            if in_percent_word_array {
-                if line.contains(']') {
-                    in_percent_word_array = false;
+            // If we are inside a multiline %w/%W/%i/%I array, scan for the closing
+            // delimiter to end the context, then skip operator checking for this line.
+            if let Some(close) = in_percent_word_array {
+                if line.as_bytes().contains(&close) {
+                    in_percent_word_array = None;
                 }
                 continue;
             }
@@ -242,7 +242,7 @@ impl Rule for SpaceAroundOperators {
                                 // - anything else → generic multiline percent literal
                                 if depth > 0 {
                                     if matches!(next_b, b'w' | b'W' | b'i' | b'I') {
-                                        in_percent_word_array = true;
+                                        in_percent_word_array = Some(close);
                                     } else {
                                         in_multiline_percent_regex = Some((close, depth));
                                     }
