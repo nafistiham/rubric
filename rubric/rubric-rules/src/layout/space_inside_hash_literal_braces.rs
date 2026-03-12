@@ -33,6 +33,8 @@ impl Rule for SpaceInsideHashLiteralBraces {
         let mut in_multiline_regex = false;
         let mut in_percent_regex = false;
         let mut percent_regex_depth = 0usize;
+        // Tracks same-char delimiter multiline percent literals (e.g. %r!...!, %r|...|)
+        let mut in_same_char_percent: Option<u8> = None;
         let mut in_heredoc: Option<String> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
@@ -88,6 +90,17 @@ impl Rule for SpaceInsideHashLiteralBraces {
                 continue;
             }
 
+            // --- Multiline same-char percent literal body (e.g. %r!...!) ---
+            if let Some(close) = in_same_char_percent {
+                let mut j = 0;
+                while j < len {
+                    if bytes[j] == b'\\' { j += 2; continue; }
+                    if bytes[j] == close { in_same_char_percent = None; break; }
+                    j += 1;
+                }
+                continue;
+            }
+
             let mut in_string: Option<u8> = None;
 
             let mut j = 0;
@@ -132,10 +145,15 @@ impl Rule for SpaceInsideHashLiteralBraces {
                                 _ => { j += 1; }
                             }
                         }
-                        if depth > 0 && open_delim == b'{' {
-                            // Unclosed brace-style — multiline percent literal
-                            in_percent_regex = true;
-                            percent_regex_depth = depth - 1;
+                        if depth > 0 {
+                            if brace_style && open_delim == b'{' {
+                                // Unclosed brace-style %r{...} — multiline
+                                in_percent_regex = true;
+                                percent_regex_depth = depth - 1;
+                            } else if !brace_style {
+                                // Unclosed same-char delimiter — multiline
+                                in_same_char_percent = Some(close_delim);
+                            }
                         }
                         continue;
                     }
