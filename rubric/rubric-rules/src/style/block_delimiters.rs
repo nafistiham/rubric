@@ -14,11 +14,26 @@ impl Rule for BlockDelimiters {
 
         // Track open `{` that appear at end of a line (after a method call).
         // If the matching `}` is on a different line, flag the `{`.
+        let mut in_heredoc: Option<String> = None;
         let mut i = 0;
         while i < n {
             let line = &lines[i];
             let trimmed_start = line.trim_start();
             let trimmed = line.trim_end();
+
+            // Skip heredoc body lines
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim() == term.as_str() {
+                    in_heredoc = None;
+                }
+                i += 1;
+                continue;
+            }
+            // Detect heredoc opener (body starts on next line)
+            if let Some(term) = extract_heredoc_terminator_bd(line) {
+                in_heredoc = Some(term);
+                // Fall through: the opener line itself is real Ruby
+            }
 
             // Skip comment lines — a line that starts with `#` after leading whitespace
             if trimmed_start.starts_with('#') {
@@ -163,6 +178,27 @@ fn is_percent_literal_opener(before_brace: &str) -> bool {
         return true;
     }
     false
+}
+
+/// Extract the heredoc terminator word from a line (e.g. `<<~TERM` → `"TERM"`).
+fn extract_heredoc_terminator_bd(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i + 1 < len {
+        if bytes[i] == b'<' && bytes[i + 1] == b'<' {
+            let mut j = i + 2;
+            if j < len && (bytes[j] == b'-' || bytes[j] == b'~') { j += 1; }
+            if j < len && matches!(bytes[j], b'\'' | b'"' | b'`') { j += 1; }
+            let start = j;
+            while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') { j += 1; }
+            if j > start {
+                return Some(line[start..j].to_string());
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Returns true if the word `lambda` appears as the last token of `before_brace`.
