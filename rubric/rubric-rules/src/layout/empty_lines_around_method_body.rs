@@ -60,9 +60,9 @@ impl Rule for EmptyLinesAroundMethodBody {
             let trimmed = lines[i].trim();
 
             if trimmed.starts_with("def ") || trimmed == "def" {
-                // Skip single-line method definitions: `def foo; end` or `def foo; body; end`
-                // These close on the same line — no multi-line body to check.
-                if trimmed.ends_with("; end") {
+                // Skip single-line method definitions: `def foo; end`, `def foo; body; end`,
+                // or `def foo  body  end` (space-separated). These close on the same line.
+                if trimmed.ends_with("; end") || trimmed.ends_with(" end") {
                     i += 1;
                     continue;
                 }
