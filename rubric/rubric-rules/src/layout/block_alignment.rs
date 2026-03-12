@@ -208,6 +208,34 @@ fn is_endless_method_def(t: &str) -> bool {
     false
 }
 
+/// Extract the heredoc terminator word from a line (e.g. `<<~TERM` → `"TERM"`).
+fn extract_heredoc_terminator_ba(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut in_str: Option<u8> = None;
+    let mut i = 0;
+    while i + 1 < len {
+        match in_str {
+            Some(_) if bytes[i] == b'\\' => { i += 2; continue; }
+            Some(d) if bytes[i] == d => { in_str = None; i += 1; continue; }
+            Some(_) => { i += 1; continue; }
+            None if bytes[i] == b'"' || bytes[i] == b'\'' => { in_str = Some(bytes[i]); i += 1; continue; }
+            None if bytes[i] == b'#' => break,
+            None => {}
+        }
+        if bytes[i] == b'<' && bytes[i + 1] == b'<' {
+            let mut j = i + 2;
+            if j < len && (bytes[j] == b'-' || bytes[j] == b'~') { j += 1; }
+            if j < len && (bytes[j] == b'\'' || bytes[j] == b'"' || bytes[j] == b'`') { j += 1; }
+            let start = j;
+            while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') { j += 1; }
+            if j > start { return Some(line[start..j].to_string()); }
+        }
+        i += 1;
+    }
+    None
+}
+
 impl Rule for BlockAlignment {
     fn name(&self) -> &'static str {
         "Layout/BlockAlignment"
@@ -227,11 +255,25 @@ impl Rule for BlockAlignment {
         // For non-chain openers, chain_indent == do_line_indent.
         // For chain openers (trimmed starts with `.`), chain_indent is the first line of the chain.
         let mut stack: Vec<(usize, usize, usize, bool)> = Vec::new();
+        let mut in_heredoc: Option<String> = None;
 
         for i in 0..n {
             let line = &lines[i];
             let trimmed = line.trim_start();
             let indent = line.len() - trimmed.len();
+
+            // Skip heredoc body lines
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim() == term.as_str() {
+                    in_heredoc = None;
+                }
+                continue;
+            }
+
+            // Detect heredoc opener (fall through to process the opener line itself)
+            if let Some(term) = extract_heredoc_terminator_ba(line) {
+                in_heredoc = Some(term);
+            }
 
             if trimmed.starts_with('#') {
                 continue;
@@ -362,6 +404,20 @@ impl Rule for BlockAlignment {
                         } else {
                             (indent, indent)
                         }
+                    }
+                    // Pattern 3: backslash-continuation line ends with ` do`.
+                    // e.g. `should "long description" \` + `"cont" do`
+                    // The logical block starts on the first line of the continuation.
+                    else if i > 0 && lines[i - 1].trim_end().ends_with('\\') {
+                        // Walk backward to find the first line of the continuation chain:
+                        // the first line whose preceding line does NOT end with `\`.
+                        let mut j = i - 1;
+                        while j > 0 && lines[j - 1].trim_end().ends_with('\\') {
+                            j -= 1;
+                        }
+                        let first_line = &lines[j];
+                        let ci = first_line.len() - first_line.trim_start().len();
+                        (ci, indent)
                     }
                     else {
                         (indent, indent)

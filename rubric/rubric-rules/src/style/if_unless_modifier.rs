@@ -23,24 +23,39 @@ impl Rule for IfUnlessModifier {
             let is_unless = line0.starts_with("unless ") || line0 == "unless";
 
             if (is_if || is_unless) && line2 == "end" {
-                // line1 must be a single statement (not contain keywords that add depth)
+                // line1 must be a single statement (not contain keywords that add depth).
+                // Also skip `then body` form: `unless cond\n  then body\n end` —
+                // rubocop does not suggest modifier conversion for that syntax.
                 let adds_depth = line1.starts_with("if ") || line1.starts_with("unless ")
                     || line1.starts_with("while ") || line1.starts_with("until ")
                     || line1.starts_with("for ") || line1.starts_with("def ")
                     || line1.starts_with("class ") || line1.starts_with("module ")
                     || line1.starts_with("begin") || line1.ends_with(" do")
+                    || line1.starts_with("then ")
                     || line1 == "else" || line1 == "elsif" || line1.starts_with("elsif ")
                     || line1.is_empty();
 
                 if !adds_depth {
-                    let line_start = ctx.line_start_offsets[i];
-                    let keyword_len = if is_if { 2 } else { 6 }; // "if" or "unless"
-                    diags.push(Diagnostic {
-                        rule: self.name(),
-                        message: "Use modifier form instead of multi-line `if`/`unless`.".into(),
-                        range: TextRange::new(line_start, line_start + keyword_len),
-                        severity: Severity::Warning,
-                    });
+                    // Only flag when the resulting modifier form fits in 80 chars.
+                    // One-liner: `{body} {if|unless} {condition}` at the original indent.
+                    let indent = lines[i].len() - lines[i].trim_start().len();
+                    let keyword = if is_if { "if" } else { "unless" };
+                    let cond = if line0.len() > keyword.len() + 1 {
+                        &line0[keyword.len() + 1..]
+                    } else {
+                        ""
+                    };
+                    let one_liner_len = indent + line1.len() + 1 + keyword.len() + 1 + cond.len();
+                    if one_liner_len <= 80 {
+                        let line_start = ctx.line_start_offsets[i];
+                        let keyword_len = if is_if { 2 } else { 6 }; // "if" or "unless"
+                        diags.push(Diagnostic {
+                            rule: self.name(),
+                            message: "Use modifier form instead of multi-line `if`/`unless`.".into(),
+                            range: TextRange::new(line_start, line_start + keyword_len),
+                            severity: Severity::Warning,
+                        });
+                    }
                 }
             }
             i += 1;

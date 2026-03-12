@@ -406,7 +406,10 @@ impl Rule for SpaceAfterComma {
 
                     None if b == b',' => {
                         let next = line_bytes.get(j + 1).copied();
-                        if next != Some(b' ') && next != Some(b'\t') && next.is_some() {
+                        // Don't flag trailing commas before closing brackets/parens/braces
+                        // (e.g. `[a, b,]` or `foo(a, b,)`) — rubocop allows these.
+                        let is_trailing = matches!(next, Some(b']') | Some(b')') | Some(b'}') | Some(b'>'));
+                        if !is_trailing && next != Some(b' ') && next != Some(b'\t') && next.is_some() {
                             let pos = (line_start + j) as u32;
                             diags.push(Diagnostic {
                                 rule: self.name(),
