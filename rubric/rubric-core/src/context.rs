@@ -12,7 +12,7 @@ pub struct LintContext<'src> {
 
 impl<'src> LintContext<'src> {
     pub fn new(path: &'src Path, source: &'src str) -> Self {
-        let lines: Vec<&str> = source.lines().collect();
+        let mut lines: Vec<&str> = source.lines().collect();
         let mut offsets = Vec::with_capacity(lines.len());
         let mut offset: u32 = 0;
         let mut remaining = source;
@@ -30,6 +30,13 @@ impl<'src> LintContext<'src> {
             }
             // No newline at end of file — offset stays as-is
         }
+        // Truncate at `__END__` — Ruby ignores everything after this sentinel.
+        let end_marker = lines.iter().position(|l| *l == "__END__");
+        if let Some(end_idx) = end_marker {
+            lines.truncate(end_idx);
+            offsets.truncate(end_idx);
+        }
+
         Self {
             path,
             source,

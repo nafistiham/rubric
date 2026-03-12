@@ -41,10 +41,12 @@ impl Rule for SpaceAroundOperators {
         let mut diags = Vec::new();
         // Cross-line heredoc tracking: Some(terminator) while inside a heredoc body.
         let mut in_heredoc: Option<String> = None;
-        // Cross-line percent-word-array tracking: Some(close_byte) while inside %w[...],
-        // %w(...), %W[...], %i[...], %I[...] that spans multiple lines.
+        // Cross-line percent-word-array tracking: Some((open, close, depth)) while inside
+        // %w[...], %w(...), %W[...], %i[...], %I[...] that spans multiple lines.
+        // Uses depth tracking so that elements containing `]` (like `file.rb[1:1]`) don't
+        // prematurely close the array state. Same-char delimiters use depth=0 as sentinel.
         // Lines inside are plain word tokens — no operator scanning applies.
-        let mut in_percent_word_array: Option<u8> = None;
+        let mut in_percent_word_array: Option<(u8, u8, usize)> = None;
         // Cross-line multiline /regex/ tracking: true when a /regex/ started on a
         // previous line and hasn't been closed yet.
         let mut in_multiline_regex = false;
@@ -155,11 +157,29 @@ impl Rule for SpaceAroundOperators {
             // the inner `"` starts a new string within the #{...} block).
             let mut in_nested_string: Option<u8> = None;
 
-            // If we are inside a multiline %w/%W/%i/%I array, scan for the closing
-            // delimiter to end the context, then skip operator checking for this line.
-            if let Some(close) = in_percent_word_array {
-                if line.as_bytes().contains(&close) {
-                    in_percent_word_array = None;
+            // If we are inside a multiline %w/%W/%i/%I array, depth-track to find the
+            // actual closing delimiter, then skip operator checking for this line.
+            if let Some((open, close, ref mut depth)) = in_percent_word_array {
+                let lb = line.as_bytes();
+                let mut k = 0;
+                if open == close {
+                    // Same-char delimiter: scan for first unescaped close
+                    while k < lb.len() {
+                        if lb[k] == b'\\' { k += 2; continue; }
+                        if lb[k] == close { in_percent_word_array = None; break; }
+                        k += 1;
+                    }
+                } else {
+                    // Bracket-style: depth tracking (depth starts at 1 from opener line)
+                    while k < lb.len() {
+                        if lb[k] == b'\\' { k += 2; continue; }
+                        if lb[k] == open { *depth += 1; }
+                        else if lb[k] == close {
+                            *depth -= 1;
+                            if *depth == 0 { in_percent_word_array = None; break; }
+                        }
+                        k += 1;
+                    }
                 }
                 continue;
             }
@@ -242,7 +262,7 @@ impl Rule for SpaceAroundOperators {
                                 // - anything else → generic multiline percent literal
                                 if depth > 0 {
                                     if matches!(next_b, b'w' | b'W' | b'i' | b'I') {
-                                        in_percent_word_array = Some(close);
+                                        in_percent_word_array = Some((open, close, depth));
                                     } else {
                                         in_multiline_percent_regex = Some((close, depth));
                                     }
