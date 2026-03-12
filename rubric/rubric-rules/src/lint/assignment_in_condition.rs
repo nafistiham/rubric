@@ -29,6 +29,7 @@ impl Rule for AssignmentInCondition {
             let bytes = line.as_bytes();
             let len = bytes.len();
             let mut in_string: Option<u8> = None;
+            let mut paren_depth: i32 = 0;
             let mut j = 0;
 
             while j < len {
@@ -42,6 +43,9 @@ impl Rule for AssignmentInCondition {
                     None => {}
                 }
 
+                if b == b'(' { paren_depth += 1; j += 1; continue; }
+                if b == b')' { paren_depth -= 1; j += 1; continue; }
+
                 if b == b'=' {
                     // Check it's not `==`, `!=`, `<=`, `>=`, `=>`
                     let prev = if j > 0 { bytes[j - 1] } else { 0 };
@@ -50,7 +54,13 @@ impl Rule for AssignmentInCondition {
                     let is_comparison = next == b'=' || next == b'>' || prev == b'!' || prev == b'<' || prev == b'>' || prev == b'=';
 
                     if !is_comparison {
-                        // It's a single `=` — assignment in condition
+                        // `AllowSafeAssignment: true` (rubocop default): skip if inside parens,
+                        // e.g. `if (x = foo)` — the parens signal intentionality.
+                        if paren_depth > 0 {
+                            j += 1;
+                            continue;
+                        }
+                        // It's a single `=` outside parens — likely unintentional
                         let line_start = ctx.line_start_offsets[i];
                         diags.push(Diagnostic {
                             rule: self.name(),

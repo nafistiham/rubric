@@ -331,6 +331,14 @@ impl Rule for AndOr {
                 }
             }
 
+            // If the previous non-empty line ends with `.`, this line may be a method
+            // chain continuation (e.g., rspec `.and include(...)`). Detect this so
+            // `and`/`or` at the start of the line is treated as a method call, not a keyword.
+            let prev_line_ends_with_dot = i > 0 && {
+                let prev = lines[i - 1].trim_end();
+                prev.ends_with('.')
+            };
+
             for (pattern, kw_len) in &[(" and ", 3usize), (" or ", 2usize)] {
                 let mut search_start = 0usize;
                 while let Some(pos) = line[search_start..].find(pattern) {
@@ -342,6 +350,15 @@ impl Rule for AndOr {
                         if search_start >= line.len() {
                             break;
                         }
+                        continue;
+                    }
+
+                    // Skip if `and`/`or` appears at the start of the line (only whitespace
+                    // before it) and the previous line ends with `.` — this is a method chain
+                    // continuation (e.g., rspec `.and include(...)`), not the keyword.
+                    if prev_line_ends_with_dot && bytes[..abs_pos].iter().all(|&b| b == b' ' || b == b'\t') {
+                        search_start = abs_pos + 1;
+                        if search_start >= line.len() { break; }
                         continue;
                     }
 

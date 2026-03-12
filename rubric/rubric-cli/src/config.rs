@@ -12,6 +12,9 @@ use std::path::Path;
 struct RawRuleConfig {
     #[serde(default = "default_true")]
     enabled: bool,
+    /// Glob patterns for files to exclude from this rule (relative to project root).
+    #[serde(default)]
+    exclude: Vec<String>,
 }
 
 /// Intermediate struct that mirrors the raw TOML layout.
@@ -54,6 +57,8 @@ fn default_true() -> bool {
 #[derive(Debug)]
 pub struct RuleConfig {
     pub enabled: bool,
+    /// Glob patterns for files to exclude from this rule (relative to project root).
+    pub exclude: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -122,7 +127,7 @@ impl Config {
         };
 
         let rules = raw.rules.into_iter()
-            .map(|(k, v)| (k, RuleConfig { enabled: v.enabled }))
+            .map(|(k, v)| (k, RuleConfig { enabled: v.enabled, exclude: v.exclude }))
             .collect();
 
         Ok(Self {

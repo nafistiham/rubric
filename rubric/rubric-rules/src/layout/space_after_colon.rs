@@ -92,12 +92,41 @@ impl Rule for SpaceAfterColon {
         // Cross-line string tracking (multiline backtick strings)
         // Stores the string delimiter (`'``)
         let mut in_multiline_string: Option<u8> = None;
+        // Cross-line percent literal tracking: (open_byte, close_byte, depth)
+        let mut in_percent_literal: Option<(u8, u8, usize)> = None;
 
         for (i, line) in lines.iter().enumerate() {
             // ── Heredoc body ─────────────────────────────────────────────────
             if let Some(ref term) = in_heredoc.clone() {
                 if line.trim() == term.as_str() {
                     in_heredoc = None;
+                }
+                continue;
+            }
+
+            // ── Multiline percent literal continuation ────────────────────────
+            if let Some((open, close, ref mut depth)) = in_percent_literal {
+                let lb = line.as_bytes();
+                if open == close {
+                    // Symmetric delimiter: scan for first unescaped close
+                    let mut k = 0;
+                    while k < lb.len() {
+                        if lb[k] == b'\\' { k += 2; continue; }
+                        if lb[k] == close { in_percent_literal = None; break; }
+                        k += 1;
+                    }
+                } else {
+                    // Bracket-style: depth tracking
+                    let mut k = 0;
+                    while k < lb.len() {
+                        if lb[k] == b'\\' { k += 2; continue; }
+                        if lb[k] == open { *depth += 1; }
+                        else if lb[k] == close {
+                            *depth -= 1;
+                            if *depth == 0 { in_percent_literal = None; break; }
+                        }
+                        k += 1;
+                    }
                 }
                 continue;
             }
@@ -178,10 +207,15 @@ impl Rule for SpaceAfterColon {
                         j = delim_start + 1;
                         if open == close {
                             // Symmetric delimiter: scan until unescaped close
-                            while j < len && bytes[j] != close {
-                                if bytes[j] == b'\\' { j += 2; } else { j += 1; }
+                            let mut closed = false;
+                            while j < len {
+                                if bytes[j] == b'\\' { j += 2; continue; }
+                                if bytes[j] == close { closed = true; j += 1; break; }
+                                j += 1;
                             }
-                            if j < len { j += 1; }
+                            if !closed {
+                                in_percent_literal = Some((open, close, 0));
+                            }
                         } else {
                             // Bracket delimiter: track nesting depth
                             let mut depth = 1usize;
@@ -192,6 +226,9 @@ impl Rule for SpaceAfterColon {
                                     c if c == close => { depth -= 1; j += 1; }
                                     _ => { j += 1; }
                                 }
+                            }
+                            if depth > 0 {
+                                in_percent_literal = Some((open, close, depth));
                             }
                         }
                         continue;

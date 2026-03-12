@@ -21,10 +21,12 @@ impl Rule for BooleanSymbol {
                     let b = src.as_bytes()[end];
                     !b.is_ascii_alphanumeric() && b != b'_'
                 };
-                // Check that `:` is not preceded by `:` (avoid `::true`) or a quote char
+                // Check that `:` is not preceded by `:` (avoid `::true`), a quote char,
+                // or a word char (e.g. `foo:true` is a hash key, not a symbol).
                 let before_ok = abs_pos == 0 || {
                     let before = src.as_bytes()[abs_pos - 1];
                     before != b':' && before != b'"' && before != b'\''
+                        && !before.is_ascii_alphanumeric() && before != b'_'
                 };
 
                 if after_ok && before_ok {

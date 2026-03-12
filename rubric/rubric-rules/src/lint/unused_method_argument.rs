@@ -155,6 +155,33 @@ impl Rule for UnusedMethodArgument {
         }
         let body_src = &src[body_start..body_end];
 
+        // If the body contains bare `super` (not `super()` which passes nothing),
+        // all arguments are implicitly forwarded — nothing to flag.
+        if name_used_in_source(b"super", body_src) {
+            // Check it's not `super()` — bare super passes all args, super() passes none.
+            // We scan for `super` not immediately followed by `(`.
+            let mut has_bare_super = false;
+            let mut pos = 0;
+            while pos + 5 <= body_src.len() {
+                if &body_src[pos..pos + 5] == b"super" {
+                    let before_ok = pos == 0 || {
+                        let b = body_src[pos - 1];
+                        !b.is_ascii_alphanumeric() && b != b'_'
+                    };
+                    let after = if pos + 5 < body_src.len() { body_src[pos + 5] } else { b'\n' };
+                    let after_ok = !after.is_ascii_alphanumeric() && after != b'_';
+                    if before_ok && after_ok && after != b'(' {
+                        has_bare_super = true;
+                        break;
+                    }
+                }
+                pos += 1;
+            }
+            if has_bare_super {
+                return vec![];
+            }
+        }
+
         let mut diags = Vec::new();
         for (name_bytes, name_start, name_end) in &param_list {
             // _-prefixed: intentionally unused

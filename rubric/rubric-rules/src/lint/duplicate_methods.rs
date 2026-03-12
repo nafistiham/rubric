@@ -273,6 +273,17 @@ impl Rule for DuplicateMethods {
                 stack.pop();
             }
 
+            // --- `undef` removes a method from the scope ---
+            // Pattern: `undef items_for` before redefining — not a duplicate.
+            if trimmed.starts_with("undef ") {
+                let name = trimmed["undef ".len()..].trim();
+                // Remove from the nearest isolating frame so the next `def` isn't flagged.
+                let len = stack.len();
+                if let Some(idx) = (0..len).rev().find(|&i| stack[i].2) {
+                    stack[idx].0.remove(name);
+                }
+            }
+
             // --- Record/check `def` method name ---
             if trimmed.starts_with("def ") {
                 let after_def = &trimmed["def ".len()..];

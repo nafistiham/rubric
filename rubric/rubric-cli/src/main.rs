@@ -349,6 +349,19 @@ fn main() -> Result<()> {
             }
 
             let mut results = runner::run_all_files(&files, &rules);
+            // Filter out diagnostics for files excluded by per-rule config.
+            for (file, _source, diagnostics) in &mut results {
+                diagnostics.retain(|d| {
+                    if let Some(rule_cfg) = config.rules.get(d.rule) {
+                        if !rule_cfg.exclude.is_empty()
+                            && is_excluded(file, &config_dir, &rule_cfg.exclude)
+                        {
+                            return false;
+                        }
+                    }
+                    true
+                });
+            }
             // Sort by path for deterministic output
             results.sort_by(|a, b| a.0.cmp(&b.0));
 
