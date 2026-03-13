@@ -90,6 +90,24 @@ fn paren_depth_delta(line: &str) -> i32 {
     delta
 }
 
+/// Extract heredoc terminator from a line (handles `<<TERM`, `<<-TERM`, `<<~TERM`).
+fn extract_heredoc_terminator_moi(line: &str) -> Option<String> {
+    let idx = line.find("<<")?;
+    let rest = &line[idx + 2..];
+    let rest = rest.trim_start_matches(|c| c == '-' || c == '~');
+    let (rest, quoted) = if rest.starts_with('"') || rest.starts_with('\'') || rest.starts_with('`') {
+        (&rest[1..], true)
+    } else {
+        (rest, false)
+    };
+    let end = rest.find(|c: char| {
+        if quoted { c == '"' || c == '\'' || c == '`' }
+        else { !c.is_ascii_alphanumeric() && c != '_' }
+    }).unwrap_or(rest.len());
+    let term = &rest[..end];
+    if term.is_empty() { None } else { Some(term.to_string()) }
+}
+
 impl Rule for MultilineOperationIndentation {
     fn name(&self) -> &'static str {
         "Layout/MultilineOperationIndentation"
@@ -110,10 +128,33 @@ impl Rule for MultilineOperationIndentation {
         // at base+2 where base is A's indentation — not escalating by 2 each time.
         let mut chain_base_indent: Option<usize> = None;
 
+        // Heredoc tracking: body lines and the terminator itself are not Ruby
+        // operator expressions and should not be checked for indentation.
+        let mut in_heredoc: Option<String> = None;
+
         let mut i = 0;
         while i < n {
             let line = &lines[i];
             let trimmed = line.trim_start();
+
+            // Skip heredoc body lines — their content is string data, not operators.
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim() == term.as_str() {
+                    in_heredoc = None;
+                }
+                // Reset chain on heredoc body/terminator lines.
+                chain_base_indent = None;
+                i += 1;
+                continue;
+            }
+
+            // Detect heredoc opener — body starts on next line.
+            if line.contains("<<") {
+                if let Some(term) = extract_heredoc_terminator_moi(line) {
+                    in_heredoc = Some(term);
+                    // Fall through: opener line itself still has real Ruby.
+                }
+            }
 
             // Skip comment lines
             if trimmed.starts_with('#') {
