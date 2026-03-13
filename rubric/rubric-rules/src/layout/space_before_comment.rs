@@ -2,6 +2,22 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct SpaceBeforeComment;
 
+fn heredoc_terminator(line: &str) -> Option<String> {
+    let marker = if let Some(p) = line.find("<<~") {
+        Some(&line[p + 3..])
+    } else if let Some(p) = line.find("<<-") {
+        Some(&line[p + 3..])
+    } else if let Some(p) = line.find("<<") {
+        let after = &line[p + 2..];
+        if after.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_' || c == '"' || c == '\'') {
+            Some(after)
+        } else { None }
+    } else { None }?;
+    let rest = marker.trim_start_matches(|c: char| c == '\'' || c == '"');
+    let term: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+    if term.is_empty() { None } else { Some(term) }
+}
+
 /// Returns the byte offset of the first inline comment `#` on `bytes`, or `None`.
 ///
 /// An "inline comment" is a `#` that:
@@ -148,7 +164,19 @@ impl Rule for SpaceBeforeComment {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        let mut in_heredoc = false;
+        let mut heredoc_term = String::new();
+
         for (i, line) in ctx.lines.iter().enumerate() {
+            // Skip heredoc body lines — their content is string data, not code.
+            if in_heredoc {
+                if line.trim() == heredoc_term.as_str() {
+                    in_heredoc = false;
+                    heredoc_term.clear();
+                }
+                continue;
+            }
+
             // Skip standalone comment lines — only flag inline comments after code.
             if line.trim_start().starts_with('#') {
                 continue;
@@ -170,6 +198,11 @@ impl Rule for SpaceBeforeComment {
                         severity: Severity::Warning,
                     });
                 }
+            }
+
+            if let Some(term) = heredoc_terminator(line) {
+                in_heredoc = true;
+                heredoc_term = term;
             }
         }
         diags

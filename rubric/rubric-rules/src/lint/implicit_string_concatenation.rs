@@ -30,6 +30,19 @@ impl Rule for ImplicitStringConcatenation {
                         pos += 2;
                         continue;
                     }
+                    Some(b'"') if b == b'#' && pos + 1 < n && bytes[pos + 1] == b'{' => {
+                        // Skip #{...} interpolation inside double-quoted strings —
+                        // the `"` chars inside interpolation args don't close the outer string.
+                        pos += 2; // skip `#{`
+                        let mut depth = 1usize;
+                        while pos < n && depth > 0 {
+                            if bytes[pos] == b'\\' { pos += 2; continue; }
+                            if bytes[pos] == b'{' { depth += 1; }
+                            else if bytes[pos] == b'}' { depth -= 1; }
+                            pos += 1;
+                        }
+                        continue;
+                    }
                     Some(delim) if b == delim => {
                         in_string = None;
                         string_ended_at = Some(pos);

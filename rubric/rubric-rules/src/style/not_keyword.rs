@@ -179,17 +179,14 @@ impl Rule for NotKeyword {
 /// Returns true if the character `last` (the last non-space byte before a `/`)
 /// indicates that the `/` opens a regex literal rather than being a division operator.
 ///
-/// A `/` opens a regex when the preceding token is:
-///   - An operator character: `=`, `!`, `|`, `&`, `?`, `+`, `-`, `*`, `<`, `>`
-///   - An open delimiter: `(`, `[`, `{`
-///   - A comma or semicolon: `,`, `;`
-///   - The start of the line (last_non_space was never updated, stays at b' ')
+/// A `/` is NOT regex only after a digit, a closing bracket/paren/brace, or a
+/// closing string quote — all of which indicate the preceding expression has a
+/// value that `/` would divide.  After identifiers (method names, variables),
+/// operators, or opening delimiters, `/` is treated as a regex opener.  This
+/// matches the heuristic most Ruby text scanners use and avoids flagging `not`
+/// inside regex patterns like `Then /^output should not contain.../`.
 fn is_regex_start(last: u8) -> bool {
-    matches!(
-        last,
-        b' ' | b'=' | b'!' | b'|' | b'&' | b'?' | b'+' | b'-' | b'*'
-            | b'<' | b'>' | b'(' | b'[' | b'{' | b',' | b';' | b':'
-    )
+    !matches!(last, b'0'..=b'9' | b')' | b']' | b'}' | b'"' | b'\'')
 }
 
 /// Extract the heredoc terminator word from a line containing `<<~TERM`, `<<-TERM`, or `<<TERM`.

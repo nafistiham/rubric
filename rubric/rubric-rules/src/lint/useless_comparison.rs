@@ -2,6 +2,24 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct UselessComparison;
 
+/// Returns true if `pos` in `bytes` is inside a `"` or `'` string literal.
+fn in_string_context(bytes: &[u8], pos: usize) -> bool {
+    let mut in_str: Option<u8> = None;
+    let mut i = 0;
+    while i < pos {
+        match in_str {
+            Some(_) if bytes[i] == b'\\' => { i += 2; continue; }
+            Some(d) if bytes[i] == d => { in_str = None; }
+            Some(_) => {}
+            None if bytes[i] == b'"' || bytes[i] == b'\'' => { in_str = Some(bytes[i]); }
+            None if bytes[i] == b'#' => break,
+            None => {}
+        }
+        i += 1;
+    }
+    in_str.is_some()
+}
+
 const OPS: &[&str] = &["==", "!=", "<=", ">=", "<", ">"];
 
 impl Rule for UselessComparison {
@@ -71,7 +89,8 @@ impl Rule for UselessComparison {
                             b'&' | b'|' | b'^' | b'+' | b'-' | b'*' | b'/' | b'%'
                         );
 
-                    if !rhs.is_empty() && lhs == rhs && !lhs_has_receiver && !lhs_has_operator_prefix {
+                    if !rhs.is_empty() && lhs == rhs && !lhs_has_receiver && !lhs_has_operator_prefix
+                        && !in_string_context(line.as_bytes(), abs_pos) {
                         let line_start = ctx.line_start_offsets[i] as usize;
                         let op_pos = (line_start + abs_pos) as u32;
                         diags.push(Diagnostic {

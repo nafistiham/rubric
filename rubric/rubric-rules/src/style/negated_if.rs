@@ -28,6 +28,43 @@ fn is_compound_condition(condition: &str) -> bool {
     false
 }
 
+/// Return true when the `if` block starting at line `start_line` (with indent
+/// `block_indent`) contains an `elsif` branch.  We look ahead until we find
+/// the matching `end` (or EOF), stopping at `elsif` at the same indent level.
+/// This prevents flagging `if !cond ... elsif ...` since `unless` cannot have
+/// an `elsif` branch in Ruby.
+fn block_has_elsif(lines: &[&str], start_line: usize, block_indent: usize) -> bool {
+    let mut depth: i32 = 1; // we are already inside the `if` block
+    let mut j = start_line + 1;
+    while j < lines.len() && depth > 0 {
+        let t = lines[j].trim_start();
+        let t_indent = lines[j].len() - t.len();
+        // Only look at `elsif` at the same indentation level.
+        if t_indent == block_indent {
+            if t.starts_with("elsif ") || t == "elsif" {
+                return true;
+            }
+            if t == "end" || t.starts_with("end ") || t.starts_with("end.") {
+                depth -= 1;
+                j += 1;
+                continue;
+            }
+        }
+        // Track depth changes for nested blocks (simplified: only `if`/`unless`/`do` etc.).
+        if t.starts_with("if ") || t.starts_with("unless ") || t.starts_with("case ")
+            || t.starts_with("begin") || t.starts_with("def ") || t.starts_with("do ")
+            || t.ends_with(" do") || t.ends_with(" do |")
+        {
+            depth += 1;
+        }
+        if t == "end" || t.starts_with("end ") || t.starts_with("end.") {
+            depth -= 1;
+        }
+        j += 1;
+    }
+    false
+}
+
 impl Rule for NegatedIf {
     fn name(&self) -> &'static str {
         "Style/NegatedIf"
@@ -53,6 +90,12 @@ impl Rule for NegatedIf {
                     // Skip compound conditions — cannot be mechanically rewritten
                     // with `unless` (RuboCop leaves these alone).
                     if is_compound_condition(after_if) {
+                        continue;
+                    }
+                    // Skip when the block has an `elsif` branch — Ruby has no
+                    // `unless ... elsif`, so the conversion is impossible and
+                    // RuboCop leaves such blocks alone.
+                    if block_has_elsif(&ctx.lines, i, indent) {
                         continue;
                     }
                     let pos = (line_start + indent) as u32;

@@ -75,12 +75,21 @@ fn pos_context(line: &[u8], pos: usize) -> PosContext {
                 if b == b'\\' {
                     i += 2;
                     continue;
+                } else if b == b'#' && i + 1 < lim && line[i + 1] == b'{' {
+                    // Skip #{...} interpolation — track brace depth so that
+                    // `"` chars inside the interpolation don't close the string.
+                    i += 2; // skip `#` and `{`
+                    let mut depth = 1usize;
+                    while i < lim && depth > 0 {
+                        if line[i] == b'\\' { i += 2; continue; }
+                        if line[i] == b'{' { depth += 1; }
+                        else if line[i] == b'}' { depth -= 1; }
+                        i += 1;
+                    }
+                    continue;
                 } else if b == b'"' {
                     state = State::Code;
                 }
-                // Note: #{...} interpolation is skipped conservatively —
-                // we don't recurse into it; treating it as part of the string
-                // is safe because the heredoc guard already handles multi-line.
             }
             State::InRegex => {
                 if b == b'\\' {
