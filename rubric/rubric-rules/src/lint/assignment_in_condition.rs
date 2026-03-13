@@ -51,7 +51,12 @@ impl Rule for AssignmentInCondition {
                     let prev = if j > 0 { bytes[j - 1] } else { 0 };
                     let next = if j + 1 < len { bytes[j + 1] } else { 0 };
 
-                    let is_comparison = next == b'=' || next == b'>' || prev == b'!' || prev == b'<' || prev == b'>' || prev == b'=';
+                    let is_comparison = next == b'=' || next == b'>' || next == b'~'  // ==, =>, =~
+                        || prev == b'!' || prev == b'<' || prev == b'>' || prev == b'='  // !=, <=, >=, ==
+                        || prev == b'|' || prev == b'&' || prev == b'+' || prev == b'-'  // ||=, &&=, +=, -=
+                        || prev == b'*' || prev == b'/' || prev == b'%' || prev == b'^'  // *=, /=, %=, ^=
+                        || prev == b'~'  // ~= (uncommon but safe to skip)
+                        ;
 
                     if !is_comparison {
                         // `AllowSafeAssignment: true` (rubocop default): skip if inside parens,

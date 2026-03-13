@@ -15,6 +15,8 @@ struct RawRuleConfig {
     /// Glob patterns for files to exclude from this rule (relative to project root).
     #[serde(default)]
     exclude: Vec<String>,
+    /// Maximum line length (for Layout/LineLength).
+    max: Option<u64>,
 }
 
 /// Intermediate struct that mirrors the raw TOML layout.
@@ -59,6 +61,8 @@ pub struct RuleConfig {
     pub enabled: bool,
     /// Glob patterns for files to exclude from this rule (relative to project root).
     pub exclude: Vec<String>,
+    /// Maximum line length override (for Layout/LineLength).
+    pub max: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -127,7 +131,7 @@ impl Config {
         };
 
         let rules = raw.rules.into_iter()
-            .map(|(k, v)| (k, RuleConfig { enabled: v.enabled, exclude: v.exclude }))
+            .map(|(k, v)| (k, RuleConfig { enabled: v.enabled, exclude: v.exclude, max: v.max }))
             .collect();
 
         Ok(Self {

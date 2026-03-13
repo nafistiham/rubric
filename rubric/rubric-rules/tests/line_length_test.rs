@@ -8,7 +8,7 @@ const CORRECTED: &str = include_str!("fixtures/layout/line_length/corrected.rb")
 #[test]
 fn detects_long_lines() {
     let ctx = LintContext::new(Path::new("test.rb"), OFFENDING);
-    let diags = LineLength.check_source(&ctx);
+    let diags = LineLength::default().check_source(&ctx);
     assert!(!diags.is_empty());
     assert!(diags.iter().all(|d| d.rule == "Layout/LineLength"));
 }
@@ -16,6 +16,6 @@ fn detects_long_lines() {
 #[test]
 fn no_violation_on_short_lines() {
     let ctx = LintContext::new(Path::new("test.rb"), CORRECTED);
-    let diags = LineLength.check_source(&ctx);
+    let diags = LineLength::default().check_source(&ctx);
     assert!(diags.is_empty());
 }

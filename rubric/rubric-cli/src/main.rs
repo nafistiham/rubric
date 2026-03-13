@@ -114,7 +114,7 @@ fn apply_safe_fixes(
 }
 
 fn build_rules_with_config(config: &Config) -> Vec<Box<dyn Rule + Send + Sync>> {
-    build_rules()
+    let mut rules: Vec<Box<dyn Rule + Send + Sync>> = build_rules()
         .into_iter()
         .filter(|r| {
             // If the rule is explicitly listed in the config, that wins.
@@ -129,7 +129,22 @@ fn build_rules_with_config(config: &Config) -> Vec<Box<dyn Rule + Send + Sync>> 
             // RuboCop ships disabled to stay off unless the user opts in).
             r.default_enabled()
         })
-        .collect()
+        .collect();
+
+    // Apply per-rule parameter overrides.
+    // Layout/LineLength: honour `max` from rubric.toml.
+    if let Some(rule_cfg) = config.rules.get("Layout/LineLength") {
+        if let Some(max_val) = rule_cfg.max {
+            for rule in &mut rules {
+                if rule.name() == "Layout/LineLength" {
+                    *rule = Box::new(LineLength { max: max_val as usize });
+                    break;
+                }
+            }
+        }
+    }
+
+    rules
 }
 
 fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
@@ -137,7 +152,7 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(TrailingWhitespace),
         Box::new(TrailingNewlines),
         Box::new(IndentationWidth),
-        Box::new(LineLength),
+        Box::new(LineLength::default()),
         Box::new(EmptyLines),
         Box::new(SpaceAfterComma),
         Box::new(SpaceBeforeComment),
