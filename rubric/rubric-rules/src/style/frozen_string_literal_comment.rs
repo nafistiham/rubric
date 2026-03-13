@@ -8,6 +8,10 @@ impl Rule for FrozenStringLiteralComment {
     }
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
+        // Empty files don't need a frozen string literal comment.
+        if ctx.lines.is_empty() {
+            return vec![];
+        }
         // RuboCop allows the comment on line 2 when line 1 is a shebang or encoding comment.
         let mut idx = 0;
         if let Some(first) = ctx.lines.first() {

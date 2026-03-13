@@ -47,12 +47,38 @@ impl Rule for IndentationWidth {
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let mut prev_nonempty_line: &str = "";
+
+        // Compute per-file base indent: the indentation of the first non-blank,
+        // non-comment code line. Files where everything is shifted by N spaces
+        // (e.g. a global 1-space offset from a paste artifact) should be checked
+        // relative to that base, not against absolute-zero alignment.
+        // Rubocop checks delta-per-level, so a file with consistent 1-space base
+        // is fine as long as each nesting level adds 2 more spaces.
+        let base_indent: usize = {
+            let mut base = 0usize;
+            for line in ctx.lines.iter() {
+                let t = line.trim();
+                if t.is_empty() || t.starts_with('#') {
+                    continue;
+                }
+                base = line.len() - line.trim_start_matches(' ').len();
+                break;
+            }
+            base
+        };
+
         // Track when we're inside an inline conditional (x = if / x = unless / x = case)
         // whose continuation lines have alignment-based indentation.
         let mut inline_cond_depth: usize = 0;
         // Track unclosed bracket depth across lines. When > 0 we are inside a bracket
         // expression and continuation lines use alignment indentation — skip odd-indent check.
         let mut bracket_depth: i32 = 0;
+        // When a line with odd indentation is accepted (not flagged) because its previous
+        // line ends with a continuation character, record its space count so that
+        // subsequent lines at the same or deeper indent are also accepted (they are in
+        // the same continuation block, e.g. do-block body or multiline string content).
+        // Reset whenever indentation drops back below this level.
+        let mut accepted_odd_indent: Option<usize> = None;
         // Heredoc tracking: when inside a heredoc body, skip all lines until the
         // closing delimiter.
         let mut in_heredoc = false;
@@ -158,7 +184,19 @@ impl Rule for IndentationWidth {
             }
 
             let spaces = line.len() - line.trim_start_matches(' ').len();
-            if spaces > 0 && spaces % 2 != 0 {
+            // Check indentation relative to the file's base indent offset.
+            // A file with a global 1-space offset still has valid 2-space-delta
+            // indentation; we only flag when (spaces - base_indent) is odd.
+            let effective_spaces = spaces.saturating_sub(base_indent);
+
+            // Reset accepted_odd_indent when we return to a lower indent level.
+            if let Some(ai) = accepted_odd_indent {
+                if spaces < ai {
+                    accepted_odd_indent = None;
+                }
+            }
+
+            if spaces > 0 && effective_spaces % 2 != 0 {
                 let prev_trim = prev_nonempty_line.trim_end();
 
                 // Strip trailing inline comment from the previous line before
@@ -248,7 +286,12 @@ impl Rule for IndentationWidth {
                     || trimmed_line.starts_with('}')
                     || is_branch_keyword;
 
-                if !is_comma_continuation && !is_bracket_continuation
+                // Skip when this line is inside a previously-accepted odd-indent region
+                // (e.g. subsequent lines of a do-block body or multiline string whose
+                // first line was accepted via is_bracket_continuation / is_dot_chain etc.).
+                let in_accepted_region = accepted_odd_indent.map_or(false, |ai| spaces >= ai);
+
+                let flagged = !is_comma_continuation && !is_bracket_continuation
                     && !is_backslash_continuation && !is_boolean_continuation
                     && !is_operator_continuation
                     && !is_dot_chain_continuation && !is_ternary_continuation
@@ -256,14 +299,20 @@ impl Rule for IndentationWidth {
                     && !is_method_chain && !is_after_branch_keyword
                     && !is_closing_token && inline_cond_depth == 0
                     && entering_depth == 0  // skip lines inside bracket expressions
-                {
+                    && !in_accepted_region;
+
+                if flagged {
                     let start = ctx.line_start_offsets[i];
                     diags.push(Diagnostic {
                         rule: self.name(),
-                        message: format!("Indentation width must be a multiple of 2 (got {spaces})."),
+                        message: format!("Indentation width must be a multiple of 2 (got {effective_spaces})."),
                         range: TextRange::new(start, start + spaces as u32),
                         severity: Severity::Warning,
                     });
+                } else if accepted_odd_indent.is_none() {
+                    // This line was accepted despite odd indentation — record the level
+                    // so subsequent lines in the same block are also accepted.
+                    accepted_odd_indent = Some(spaces);
                 }
             }
 
