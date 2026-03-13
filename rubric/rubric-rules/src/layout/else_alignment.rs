@@ -245,29 +245,44 @@ fn find_inline_keyword_col(t: &str, kw: &str) -> Option<usize> {
 
     let mut i = 0;
     while i < n {
-        if bytes[i] == b'=' {
+        let b = bytes[i];
+
+        // Determine if this character can precede an inline `if`/`unless` expression.
+        // Covers: assignment `=`, arithmetic/binary operators `+ - * /`,
+        // and grouping/collection openers `( [ ,`.
+        let is_trigger = if b == b'=' {
             // Skip `==`, `=>`, `=~`
-            if i + 1 < n && (bytes[i + 1] == b'=' || bytes[i + 1] == b'>' || bytes[i + 1] == b'~') {
+            if i + 1 < n && matches!(bytes[i + 1], b'=' | b'>' | b'~') {
                 i += 1;
-                continue;
+                false
+            } else {
+                true
             }
-            // Skip spaces after `=`
-            let mut j = i + 1;
-            while j < n && bytes[j] == b' ' { j += 1; }
-            // Check for kw at position j
-            if j + kw_len <= n && &bytes[j..j + kw_len] == kw_bytes {
-                let after_kw = j + kw_len;
-                if after_kw >= n || bytes[after_kw] == b' ' || bytes[after_kw] == b'\n' {
-                    return Some(j);
-                }
-            }
-        } else if i + 2 < n && bytes[i] == b'<' && bytes[i + 1] == b'<' {
-            // `<< kw`
+        } else if i + 1 < n && b == b'<' && bytes[i + 1] == b'<' {
+            // `<<` operator — advance past both chars, handled below
             let mut j = i + 2;
             while j < n && bytes[j] == b' ' { j += 1; }
             if j + kw_len <= n && &bytes[j..j + kw_len] == kw_bytes {
                 let after_kw = j + kw_len;
                 if after_kw >= n || bytes[after_kw] == b' ' {
+                    return Some(j);
+                }
+            }
+            i += 1;
+            false
+        } else {
+            // + - * / ( [ ,  all can precede an inline if/unless expression.
+            matches!(b, b'+' | b'-' | b'*' | b'/' | b'(' | b'[' | b',')
+        };
+
+        if is_trigger {
+            // Skip spaces after trigger character
+            let mut j = i + 1;
+            while j < n && bytes[j] == b' ' { j += 1; }
+            // Check for kw at position j followed by space or EOL
+            if j + kw_len <= n && &bytes[j..j + kw_len] == kw_bytes {
+                let after_kw = j + kw_len;
+                if after_kw >= n || bytes[after_kw] == b' ' || bytes[after_kw] == b'\n' {
                     return Some(j);
                 }
             }

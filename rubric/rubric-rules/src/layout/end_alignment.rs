@@ -501,15 +501,50 @@ impl Rule for EndAlignment {
             // false diagnostics.
             //
             // Detect `do` at end of line. Use the raw `trimmed` (not comment-stripped) so
-            // that `#method` and `#<Obj>` inside regex literals are not mistaken for comment
-            // starts. False positive mitigation: if there is a ` # ` (space-hash-space)
-            // comment marker BEFORE the trailing ` do` and the comment text itself ends with
-            // ` do`, the `do` is English prose inside a comment, not a Ruby keyword.
+            // Check if the line (raw) ends with ` do`.
             let raw_do_at_end = trimmed == "do" || trimmed.ends_with(" do");
+            // Exclude cases where ` do` at end-of-line is inside a comment:
+            //   `some_code # prose that mentions do`
+            // but NOT `#` inside a string literal or `#method` patterns.
+            // Uses a string-aware forward scan — only ` #` preceded by a space is a
+            // real comment start; `#method` (no preceding space) is a method reference.
             let is_comment_ending_do = raw_do_at_end && {
-                if let Some(hash_pos) = trimmed.rfind(" # ") {
-                    let comment_text = &trimmed[hash_pos + 3..];
-                    comment_text.ends_with(" do") || comment_text == "do"
+                let bytes = trimmed.as_bytes();
+                let n = bytes.len();
+                let mut in_str: Option<u8> = None;
+                let mut real_comment_text: Option<&str> = None;
+                let mut j = 0;
+                while j < n {
+                    match in_str {
+                        Some(_) if bytes[j] == b'\\' => { j += 2; continue; }
+                        Some(d) if bytes[j] == d => { in_str = None; j += 1; continue; }
+                        Some(_) => { j += 1; continue; }
+                        None if bytes[j] == b'"' || bytes[j] == b'\'' => {
+                            in_str = Some(bytes[j]); j += 1; continue;
+                        }
+                        None if bytes[j] == b'#' => {
+                            // `#{...}` is interpolation, not a comment.
+                            if j + 1 < n && bytes[j + 1] == b'{' { j += 2; continue; }
+                            // ` # ` pattern (space before AND after `#`) → real comment.
+                            // Requiring space after `#` prevents `#<Obj>` or `#method`
+                            // patterns (common in regex literals and error messages) from
+                            // being treated as comments.
+                            if j > 0 && bytes[j - 1] == b' '
+                                && (j + 1 >= n || bytes[j + 1] == b' ')
+                            {
+                                real_comment_text = Some(&trimmed[j + 1..]);
+                                break;
+                            }
+                            // `#method`, `#<obj>`, `:sub#method` — not a comment.
+                            j += 1; continue;
+                        }
+                        None => {}
+                    }
+                    j += 1;
+                }
+                if let Some(ct) = real_comment_text {
+                    let ct = ct.trim_start();
+                    ct == "do" || ct.ends_with(" do")
                 } else {
                     false
                 }
