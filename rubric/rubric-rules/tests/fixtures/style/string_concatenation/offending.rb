@@ -1,2 +1,2 @@
-greeting = "Hello, " + name
-message = 'foo' + bar
+greeting = "Hello, " + "world"
+message = 'foo' + 'bar'
