@@ -1,0 +1,166 @@
+use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
+
+pub struct NilComparison;
+
+/// Returns the index of the comment character `#` on the line, ignoring
+/// `#` that appear inside string literals or string interpolations.
+/// Returns `None` if no real comment exists.
+fn comment_start(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut in_str: Option<u8> = None;
+    let mut interp_depth: u32 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        match in_str {
+            Some(_) if bytes[i] == b'\\' => {
+                i += 2;
+                continue;
+            }
+            Some(b'"') if bytes[i..].starts_with(b"#{") => {
+                interp_depth += 1;
+                i += 2;
+                continue;
+            }
+            Some(d) if bytes[i] == d && interp_depth == 0 => {
+                in_str = None;
+            }
+            Some(_) => {}
+            None if bytes[i] == b'"' || bytes[i] == b'\'' => {
+                in_str = Some(bytes[i]);
+            }
+            None if bytes[i] == b'#' => return Some(i),
+            None => {}
+        }
+        if interp_depth > 0 && bytes[i] == b'}' {
+            interp_depth -= 1;
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Returns true if the byte position `pos` in `line` is inside a string literal.
+fn in_string_at(bytes: &[u8], pos: usize) -> bool {
+    let mut in_str: Option<u8> = None;
+    let mut i = 0;
+    while i < pos && i < bytes.len() {
+        match in_str {
+            Some(_) if bytes[i] == b'\\' => {
+                i += 2;
+                continue;
+            }
+            Some(d) if bytes[i] == d => {
+                in_str = None;
+            }
+            Some(_) => {}
+            None if bytes[i] == b'"' || bytes[i] == b'\'' => {
+                in_str = Some(bytes[i]);
+            }
+            None if bytes[i] == b'#' => {
+                // Hit a real comment before pos — nothing after is code
+                return false;
+            }
+            None => {}
+        }
+        i += 1;
+    }
+    in_str.is_some()
+}
+
+/// If `line` contains a heredoc opener (`<<WORD`, `<<-WORD`, `<<~WORD`),
+/// returns the terminator string. Otherwise returns `None`.
+fn extract_heredoc_terminator(line: &str) -> Option<String> {
+    let pos = line.find("<<")?;
+    let rest = &line[pos + 2..];
+    let rest = rest.strip_prefix('-').unwrap_or(rest);
+    let rest = rest.strip_prefix('~').unwrap_or(rest);
+    let rest = if rest.starts_with('"') || rest.starts_with('\'') || rest.starts_with('`') {
+        &rest[1..]
+    } else {
+        rest
+    };
+    let word: String = rest
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    if word.is_empty() { None } else { Some(word) }
+}
+
+impl Rule for NilComparison {
+    fn name(&self) -> &'static str {
+        "Style/NilComparison"
+    }
+
+    fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
+        let mut diags = Vec::new();
+        let mut heredoc_term: Option<String> = None;
+
+        for (i, line) in ctx.lines.iter().enumerate() {
+            // Skip heredoc body lines
+            if let Some(ref term) = heredoc_term {
+                if line.trim() == term.as_str() {
+                    heredoc_term = None;
+                }
+                continue;
+            }
+
+            // Detect heredoc opener before processing line
+            if let Some(term) = extract_heredoc_terminator(line) {
+                heredoc_term = Some(term);
+                // Fall through: opening line is real Ruby code
+            }
+
+            let trimmed = line.trim_start();
+
+            // Skip full comment lines
+            if trimmed.starts_with('#') {
+                continue;
+            }
+
+            // Find real comment position to avoid scanning beyond it
+            let scan_end = comment_start(line).unwrap_or(line.len());
+            let scan_slice = &line[..scan_end];
+            let bytes = scan_slice.as_bytes();
+
+            let line_start = ctx.line_start_offsets[i] as usize;
+
+            // Search for `== nil` and `!= nil`
+            let patterns: &[(&[u8], &str)] = &[
+                (b"== nil", "Use `nil?` instead of `== nil`."),
+                (b"!= nil", "Use `nil?` instead of `!= nil`."),
+            ];
+
+            for (pattern, message) in patterns {
+                let mut search = 0usize;
+                while search < bytes.len() {
+                    if let Some(rel) = bytes[search..].windows(pattern.len())
+                        .position(|w| w == *pattern)
+                    {
+                        let abs = search + rel;
+
+                        // Verify word boundary after `nil` — next char must not be alphanumeric or `_`
+                        let after = abs + pattern.len();
+                        let after_ok = after >= bytes.len()
+                            || (!bytes[after].is_ascii_alphanumeric() && bytes[after] != b'_');
+
+                        if after_ok && !in_string_at(bytes, abs) {
+                            let start = (line_start + abs) as u32;
+                            let end = start + pattern.len() as u32;
+                            diags.push(Diagnostic {
+                                rule: self.name(),
+                                message: (*message).into(),
+                                range: TextRange::new(start, end),
+                                severity: Severity::Warning,
+                            });
+                        }
+                        search = abs + pattern.len();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        diags
+    }
+}
