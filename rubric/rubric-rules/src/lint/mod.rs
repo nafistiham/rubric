@@ -57,3 +57,4 @@ pub mod useless_access_modifier;
 pub mod safe_navigation_with_empty;
 pub mod inherit_exception;
 pub mod each_with_object_argument;
+pub mod useless_method_definition;
