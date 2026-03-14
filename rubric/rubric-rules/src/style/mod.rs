@@ -73,3 +73,6 @@ pub mod array_first_last;
 pub mod character_literal;
 pub mod case_equality;
 pub mod fetch_env_var;
+pub mod open_struct_use;
+pub mod date_time;
+pub mod colon_method_call;
