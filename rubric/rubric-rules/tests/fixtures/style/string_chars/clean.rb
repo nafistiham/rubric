@@ -1,0 +1,2 @@
+"hello".chars
+str.chars
