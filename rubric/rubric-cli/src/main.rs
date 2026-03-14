@@ -62,6 +62,9 @@ use rubric_rules::{
     MissingSuper,
     LiteralInInterpolation, DebuggerStatement, DuplicateMagicComment,
     EvenOdd, NilComparison, InfiniteLoop, RedundantInterpolation, StringChars,
+    CommentAnnotation, ForLoop, TrivialAccessors, HashEachMethods, WhenThen, SelectByRegexp,
+    LiteralAsCondition, UselessAccessModifier,
+    NamingVariableName,
 };
 use crate::config::Config;
 
@@ -345,6 +348,7 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(MissingSuper),
         // Session 23 cops
         Box::new(NamingClassAndModuleCamelCase),
+        Box::new(NamingVariableName),
         Box::new(LiteralInInterpolation),
         Box::new(DebuggerStatement),
         Box::new(DuplicateMagicComment),
@@ -353,6 +357,15 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(InfiniteLoop),
         Box::new(RedundantInterpolation),
         Box::new(StringChars),
+        // Session 24 cops
+        Box::new(CommentAnnotation),
+        Box::new(ForLoop),
+        Box::new(TrivialAccessors),
+        Box::new(HashEachMethods),
+        Box::new(WhenThen),
+        Box::new(SelectByRegexp),
+        Box::new(LiteralAsCondition),
+        Box::new(UselessAccessModifier),
     ]
 }
 

@@ -187,3 +187,14 @@ pub use style::nil_comparison::NilComparison;
 pub use style::infinite_loop::InfiniteLoop;
 pub use style::redundant_interpolation::RedundantInterpolation;
 pub use style::string_chars::StringChars;
+pub use style::comment_annotation::CommentAnnotation;
+pub use style::for_loop::ForLoop;
+pub use style::trivial_accessors::TrivialAccessors;
+pub use style::hash_each_methods::HashEachMethods;
+pub use style::when_then::WhenThen;
+pub use style::select_by_regexp::SelectByRegexp;
+
+pub use lint::literal_as_condition::LiteralAsCondition;
+pub use lint::useless_access_modifier::UselessAccessModifier;
+
+pub use naming::variable_name::VariableName as NamingVariableName;
