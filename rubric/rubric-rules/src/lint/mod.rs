@@ -46,3 +46,6 @@ pub mod float_out_of_range;
 pub mod suppressed_exception;
 pub mod useless_comparison;
 pub mod unreachable_code;
+pub mod percent_string_array;
+pub mod duplicate_elsif_condition;
+pub mod missing_super;

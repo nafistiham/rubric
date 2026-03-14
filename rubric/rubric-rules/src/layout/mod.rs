@@ -51,3 +51,7 @@ pub mod indentation_consistency;
 pub mod space_inside_string_interpolation;
 pub mod space_before_block_braces;
 pub mod multiline_operation_indentation;
+pub mod empty_line_after_magic_comment;
+pub mod space_before_comma;
+pub mod empty_lines_around_access_modifier;
+pub mod empty_line_after_guard_clause;

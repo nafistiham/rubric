@@ -49,6 +49,16 @@ use rubric_rules::{
     RedundantSplatExpansion, SelfAssignment, ShadowingOuterLocalVariable, StructNewOverride,
     TopLevelReturnWithArgument, UnderscorePrefixedVariableName, UriEscapeUnescape,
     UselessElseWithoutRescue, Void,
+    EmptyLineAfterMagicComment, SpaceBeforeComma,
+    MultilineIfThen, PerlBackrefs, ClassVars,
+    SecurityEval,
+    MethodDefParentheses, NumericPredicate, GlobalVars,
+    PercentStringArray, DuplicateElsifCondition,
+    NamingMethodName, NamingConstantName,
+    NamingAccessorMethodName, NamingPredicateName,
+    EmptyLinesAroundAccessModifier, EmptyLineAfterGuardClause,
+    Alias,
+    MissingSuper,
 };
 use crate::config::Config;
 
@@ -302,6 +312,34 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(UriEscapeUnescape),
         Box::new(UselessElseWithoutRescue),
         Box::new(Void),
+        // New Layout cops
+        Box::new(EmptyLineAfterMagicComment),
+        Box::new(SpaceBeforeComma),
+        // New Style cops
+        Box::new(MultilineIfThen),
+        Box::new(PerlBackrefs),
+        Box::new(ClassVars),
+        // Security cops
+        Box::new(SecurityEval),
+        // New Style cops
+        Box::new(MethodDefParentheses),
+        Box::new(NumericPredicate),
+        Box::new(GlobalVars),
+        // New Lint cops
+        Box::new(PercentStringArray),
+        Box::new(DuplicateElsifCondition),
+        // Naming cops
+        Box::new(NamingMethodName),
+        Box::new(NamingConstantName),
+        Box::new(NamingAccessorMethodName),
+        Box::new(NamingPredicateName),
+        // New Layout cops
+        Box::new(EmptyLinesAroundAccessModifier),
+        Box::new(EmptyLineAfterGuardClause),
+        // New Style cops
+        Box::new(Alias),
+        // New Lint cops
+        Box::new(MissingSuper),
     ]
 }
 

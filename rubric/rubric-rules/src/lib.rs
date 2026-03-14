@@ -1,6 +1,8 @@
 pub mod layout;
 pub mod style;
 pub mod lint;
+pub mod security;
+pub mod naming;
 
 pub use layout::end_of_line::EndOfLine;
 pub use layout::empty_lines_around_block_body::EmptyLinesAroundBlockBody;
@@ -55,6 +57,10 @@ pub use layout::indentation_consistency::IndentationConsistency;
 pub use layout::space_inside_string_interpolation::SpaceInsideStringInterpolation;
 pub use layout::space_before_block_braces::SpaceBeforeBlockBraces;
 pub use layout::multiline_operation_indentation::MultilineOperationIndentation;
+pub use layout::empty_line_after_magic_comment::EmptyLineAfterMagicComment;
+pub use layout::space_before_comma::SpaceBeforeComma;
+pub use layout::empty_lines_around_access_modifier::EmptyLinesAroundAccessModifier;
+pub use layout::empty_line_after_guard_clause::EmptyLineAfterGuardClause;
 
 pub use style::class_and_module_children::ClassAndModuleChildren;
 pub use style::documentation::Documentation;
@@ -105,6 +111,13 @@ pub use style::yoda_condition::YodaCondition;
 pub use style::raise_args::RaiseArgs;
 pub use style::signal_exception::SignalException;
 pub use style::stderr_puts::StderrPuts;
+pub use style::multiline_if_then::MultilineIfThen;
+pub use style::perl_backrefs::PerlBackrefs;
+pub use style::class_vars::ClassVars;
+pub use style::method_def_parentheses::MethodDefParentheses;
+pub use style::numeric_predicate::NumericPredicate;
+pub use style::global_vars::GlobalVars;
+pub use style::alias::Alias;
 
 pub use lint::unused_block_argument::UnusedBlockArgument;
 pub use lint::useless_setter_call::UselessSetterCall;
@@ -154,3 +167,13 @@ pub use lint::float_out_of_range::FloatOutOfRange;
 pub use lint::suppressed_exception::SuppressedException;
 pub use lint::useless_comparison::UselessComparison;
 pub use lint::unreachable_code::UnreachableCode;
+pub use lint::percent_string_array::PercentStringArray;
+pub use lint::duplicate_elsif_condition::DuplicateElsifCondition;
+pub use lint::missing_super::MissingSuper;
+
+pub use security::eval::Eval as SecurityEval;
+
+pub use naming::method_name::MethodName as NamingMethodName;
+pub use naming::constant_name::ConstantName as NamingConstantName;
+pub use naming::accessor_method_name::AccessorMethodName as NamingAccessorMethodName;
+pub use naming::predicate_name::PredicateName as NamingPredicateName;
