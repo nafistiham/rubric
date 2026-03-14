@@ -217,6 +217,35 @@ impl Rule for SpaceInsideHashLiteralBraces {
                         }
                         continue;
                     }
+                    // Skip block braces when preceded by `)`, `]`, or an identifier char
+                    // (with or without spaces). e.g. `assert_raises(Error){block}`,
+                    // `method_name{block}`, `obj.call {block}` — blocks, not hashes.
+                    let prev = if j > 0 { bytes[j - 1] } else { 0 };
+                    // Find prev non-whitespace char for the space-then-block case
+                    let prev_nonws = {
+                        let mut k = j;
+                        while k > 0 && (bytes[k - 1] == b' ' || bytes[k - 1] == b'\t') { k -= 1; }
+                        if k > 0 { bytes[k - 1] } else { 0 }
+                    };
+                    if matches!(prev, b')' | b']') || prev.is_ascii_alphanumeric() || prev == b'_'
+                        || matches!(prev_nonws, b')' | b']')
+                    {
+                        j += 1; // past `{`; skip the whole block
+                        let mut depth = 1usize;
+                        while j < len && depth > 0 {
+                            match bytes[j] {
+                                b'\\' => { j += 2; }
+                                b'"' | b'\'' => {
+                                    let q = bytes[j]; j += 1;
+                                    while j < len { if bytes[j] == b'\\' { j += 2; continue; } if bytes[j] == q { j += 1; break; } j += 1; }
+                                }
+                                b'{' => { depth += 1; j += 1; }
+                                b'}' => { depth -= 1; j += 1; }
+                                _ => { j += 1; }
+                            }
+                        }
+                        continue;
+                    }
                     // Flag if next char is not a space
                     if next != b' ' && next != b'\n' && next != 0 {
                         let pos = (line_start + j + 1) as u32;
