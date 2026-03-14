@@ -76,3 +76,6 @@ pub mod fetch_env_var;
 pub mod open_struct_use;
 pub mod date_time;
 pub mod colon_method_call;
+pub mod class_check;
+pub mod sort_comparison;
+pub mod empty_else;

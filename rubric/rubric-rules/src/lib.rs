@@ -209,3 +209,15 @@ pub use style::case_equality::CaseEquality;
 pub use style::fetch_env_var::FetchEnvVar;
 
 pub use lint::safe_navigation_with_empty::SafeNavigationWithEmpty;
+
+pub use style::class_check::ClassCheck;
+pub use style::sort_comparison::SortComparison;
+pub use style::empty_else::EmptyElse;
+pub use style::open_struct_use::OpenStructUse;
+pub use style::date_time::DateTime as StyleDateTime;
+pub use style::colon_method_call::ColonMethodCall;
+
+pub use lint::inherit_exception::InheritException;
+pub use lint::each_with_object_argument::EachWithObjectArgument;
+
+pub use naming::binary_operator_parameter_name::BinaryOperatorParameterName as NamingBinaryOperatorParameterName;

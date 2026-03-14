@@ -69,6 +69,10 @@ use rubric_rules::{
     IfInsideElse, BlockComments, EndBlock,
     CaseEquality, FetchEnvVar,
     SafeNavigationWithEmpty,
+    ClassCheck, SortComparison, EmptyElse,
+    OpenStructUse, StyleDateTime, ColonMethodCall,
+    InheritException, EachWithObjectArgument,
+    NamingBinaryOperatorParameterName,
 };
 use crate::config::Config;
 
@@ -380,6 +384,16 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(CaseEquality),
         Box::new(FetchEnvVar),
         Box::new(SafeNavigationWithEmpty),
+        // Session 26 cops
+        Box::new(ClassCheck),
+        Box::new(SortComparison),
+        Box::new(EmptyElse),
+        Box::new(OpenStructUse),
+        Box::new(StyleDateTime),
+        Box::new(ColonMethodCall),
+        Box::new(InheritException),
+        Box::new(EachWithObjectArgument),
+        Box::new(NamingBinaryOperatorParameterName),
     ]
 }
 
