@@ -49,3 +49,6 @@ pub mod unreachable_code;
 pub mod percent_string_array;
 pub mod duplicate_elsif_condition;
 pub mod missing_super;
+pub mod literal_in_interpolation;
+pub mod debugger_statement;
+pub mod duplicate_magic_comment;

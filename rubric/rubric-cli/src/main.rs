@@ -56,9 +56,12 @@ use rubric_rules::{
     PercentStringArray, DuplicateElsifCondition,
     NamingMethodName, NamingConstantName,
     NamingAccessorMethodName, NamingPredicateName,
+    NamingClassAndModuleCamelCase,
     EmptyLinesAroundAccessModifier, EmptyLineAfterGuardClause,
     Alias,
     MissingSuper,
+    LiteralInInterpolation, DebuggerStatement, DuplicateMagicComment,
+    EvenOdd, NilComparison, InfiniteLoop, RedundantInterpolation, StringChars,
 };
 use crate::config::Config;
 
@@ -340,6 +343,16 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(Alias),
         // New Lint cops
         Box::new(MissingSuper),
+        // Session 23 cops
+        Box::new(NamingClassAndModuleCamelCase),
+        Box::new(LiteralInInterpolation),
+        Box::new(DebuggerStatement),
+        Box::new(DuplicateMagicComment),
+        Box::new(EvenOdd),
+        Box::new(NilComparison),
+        Box::new(InfiniteLoop),
+        Box::new(RedundantInterpolation),
+        Box::new(StringChars),
     ]
 }
 

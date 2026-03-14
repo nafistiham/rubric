@@ -54,3 +54,8 @@ pub mod method_def_parentheses;
 pub mod numeric_predicate;
 pub mod global_vars;
 pub mod alias;
+pub mod even_odd;
+pub mod nil_comparison;
+pub mod infinite_loop;
+pub mod redundant_interpolation;
+pub mod string_chars;

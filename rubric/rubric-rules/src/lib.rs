@@ -170,6 +170,9 @@ pub use lint::unreachable_code::UnreachableCode;
 pub use lint::percent_string_array::PercentStringArray;
 pub use lint::duplicate_elsif_condition::DuplicateElsifCondition;
 pub use lint::missing_super::MissingSuper;
+pub use lint::literal_in_interpolation::LiteralInInterpolation;
+pub use lint::debugger_statement::DebuggerStatement;
+pub use lint::duplicate_magic_comment::DuplicateMagicComment;
 
 pub use security::eval::Eval as SecurityEval;
 
@@ -177,3 +180,10 @@ pub use naming::method_name::MethodName as NamingMethodName;
 pub use naming::constant_name::ConstantName as NamingConstantName;
 pub use naming::accessor_method_name::AccessorMethodName as NamingAccessorMethodName;
 pub use naming::predicate_name::PredicateName as NamingPredicateName;
+pub use naming::class_and_module_camel_case::ClassAndModuleCamelCase as NamingClassAndModuleCamelCase;
+
+pub use style::even_odd::EvenOdd;
+pub use style::nil_comparison::NilComparison;
+pub use style::infinite_loop::InfiniteLoop;
+pub use style::redundant_interpolation::RedundantInterpolation;
+pub use style::string_chars::StringChars;
