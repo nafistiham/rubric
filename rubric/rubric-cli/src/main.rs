@@ -65,6 +65,10 @@ use rubric_rules::{
     CommentAnnotation, ForLoop, TrivialAccessors, HashEachMethods, WhenThen, SelectByRegexp,
     LiteralAsCondition, UselessAccessModifier,
     NamingVariableName,
+    DoubleNegation, ArrayFirstLast, CharacterLiteral,
+    IfInsideElse, BlockComments, EndBlock,
+    CaseEquality, FetchEnvVar,
+    SafeNavigationWithEmpty,
 };
 use crate::config::Config;
 
@@ -366,6 +370,16 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(SelectByRegexp),
         Box::new(LiteralAsCondition),
         Box::new(UselessAccessModifier),
+        // Session 25 cops
+        Box::new(DoubleNegation),
+        Box::new(ArrayFirstLast),
+        Box::new(CharacterLiteral),
+        Box::new(IfInsideElse),
+        Box::new(BlockComments),
+        Box::new(EndBlock),
+        Box::new(CaseEquality),
+        Box::new(FetchEnvVar),
+        Box::new(SafeNavigationWithEmpty),
     ]
 }
 

@@ -71,3 +71,5 @@ pub mod end_block;
 pub mod double_negation;
 pub mod array_first_last;
 pub mod character_literal;
+pub mod case_equality;
+pub mod fetch_env_var;

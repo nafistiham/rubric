@@ -198,3 +198,14 @@ pub use lint::literal_as_condition::LiteralAsCondition;
 pub use lint::useless_access_modifier::UselessAccessModifier;
 
 pub use naming::variable_name::VariableName as NamingVariableName;
+
+pub use style::double_negation::DoubleNegation;
+pub use style::array_first_last::ArrayFirstLast;
+pub use style::character_literal::CharacterLiteral;
+pub use style::if_inside_else::IfInsideElse;
+pub use style::block_comments::BlockComments;
+pub use style::end_block::EndBlock;
+pub use style::case_equality::CaseEquality;
+pub use style::fetch_env_var::FetchEnvVar;
+
+pub use lint::safe_navigation_with_empty::SafeNavigationWithEmpty;

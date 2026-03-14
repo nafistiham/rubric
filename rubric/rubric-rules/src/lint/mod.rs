@@ -54,3 +54,4 @@ pub mod debugger_statement;
 pub mod duplicate_magic_comment;
 pub mod literal_as_condition;
 pub mod useless_access_modifier;
+pub mod safe_navigation_with_empty;
