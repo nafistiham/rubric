@@ -2,25 +2,22 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct UselessMethodDefinition;
 
-/// Returns true if `line` is a bare `super` call (with or without parentheses/args)
-/// and nothing else on the line (ignoring leading/trailing whitespace).
+/// Returns true if `line` is a bare `super` or empty-arg `super()` call —
+/// the only cases RuboCop considers "useless" (pure pass-through with no modification).
+/// `super(args)` and `super args` are NOT flagged: the args could differ from the
+/// method signature, making the definition meaningful.
 fn is_super_call(line: &str) -> bool {
     let t = line.trim();
-    // Must start with `super`
     if !t.starts_with("super") {
         return false;
     }
     let after = &t["super".len()..];
-    // Bare `super` with nothing after
+    // Bare `super` (no args — Ruby passes all params transparently)
     if after.is_empty() {
         return true;
     }
-    // `super(...)` — pass-through with explicit args
-    if after.starts_with('(') {
-        return true;
-    }
-    // `super arg, arg2` — pass-through with space-separated args
-    if after.starts_with(' ') || after.starts_with('\t') {
+    // `super()` — explicit empty args, still a pure pass-through
+    if after == "()" {
         return true;
     }
     false
