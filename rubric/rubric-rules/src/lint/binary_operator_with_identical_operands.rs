@@ -28,6 +28,35 @@ fn in_string_at(bytes: &[u8], pos: usize) -> bool {
     in_str.is_some()
 }
 
+/// Count unescaped `|` characters before `pos` (outside strings/comments).
+/// Used to detect whether a single `|` is a block parameter closing delimiter
+/// (odd count before = we're closing an open block param list).
+fn count_pipes_before(bytes: &[u8], pos: usize) -> usize {
+    let mut count = 0usize;
+    let mut in_str: Option<u8> = None;
+    let mut i = 0;
+    while i < pos && i < bytes.len() {
+        match in_str {
+            Some(_) if bytes[i] == b'\\' => { i += 2; continue; }
+            Some(d) if bytes[i] == d => { in_str = None; }
+            Some(_) => {}
+            None if bytes[i] == b'"' || bytes[i] == b'\'' => { in_str = Some(bytes[i]); }
+            None if bytes[i] == b'#' => break,
+            None if bytes[i] == b'|' => {
+                // Only count single `|`, not part of `||`
+                let prev_pipe = i > 0 && bytes[i - 1] == b'|';
+                let next_pipe = bytes.get(i + 1).copied() == Some(b'|');
+                if !prev_pipe && !next_pipe {
+                    count += 1;
+                }
+            }
+            None => {}
+        }
+        i += 1;
+    }
+    count
+}
+
 /// Operators to check, ordered longest-first so `&&` is matched before `&`,
 /// `||` before `|`, `==` before `=`, etc.
 const OPS: &[&str] = &[
@@ -104,6 +133,14 @@ impl Rule for BinaryOperatorWithIdenticalOperands {
                         continue;
                     }
 
+                    // For single `|`: skip if this is a block-parameter closing delimiter.
+                    // An odd count of single `|` chars before this position means we're
+                    // closing an open block param list: `{ |x, y| body }`.
+                    if *op == "|" && count_pipes_before(bytes, abs_op) % 2 == 1 {
+                        search = abs_op + op_bytes.len();
+                        continue;
+                    }
+
                     // Read LHS: word immediately before the operator (trimming whitespace)
                     let before = &line[..abs_op];
                     let before_trimmed = before.trim_end();
@@ -154,14 +191,30 @@ impl Rule for BinaryOperatorWithIdenticalOperands {
                         continue;
                     }
 
-                    // Check that RHS is not followed by a `.` (receiver) — e.g. `foo.bar`
+                    // Check that RHS is not followed by `.` or `[` — those mean
+                    // `rhs.method` or `rhs[index]`, making it different from bare `lhs`.
                     let rhs_abs_end = after_op
                         + (after.len() - after_trimmed.len()) // whitespace offset
                         + rhs_end;
-                    let rhs_has_receiver = bytes.get(rhs_abs_end).copied() == Some(b'.');
-                    if rhs_has_receiver {
+                    let rhs_next = bytes.get(rhs_abs_end).copied();
+                    if rhs_next == Some(b'.') || rhs_next == Some(b'[') {
                         search = abs_op + op_bytes.len();
                         continue;
+                    }
+                    // Check next non-space char after RHS. If it's a binary operator
+                    // the RHS is part of a sub-expression (e.g. `a && b < c`), not bare.
+                    {
+                        let mut skip_idx = rhs_abs_end;
+                        while skip_idx < bytes.len() && bytes[skip_idx] == b' ' {
+                            skip_idx += 1;
+                        }
+                        let after_rhs = bytes.get(skip_idx).copied();
+                        if matches!(after_rhs, Some(b'<') | Some(b'>') | Some(b'=') | Some(b'!')
+                            | Some(b'+') | Some(b'-') | Some(b'*') | Some(b'/') | Some(b'&')
+                            | Some(b'|') | Some(b'^') | Some(b'%')) {
+                            search = abs_op + op_bytes.len();
+                            continue;
+                        }
                     }
 
                     let op_start = (line_start + abs_op) as u32;
