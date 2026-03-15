@@ -73,6 +73,10 @@ use rubric_rules::{
     OpenStructUse, StyleDateTime, ColonMethodCall,
     InheritException, EachWithObjectArgument,
     NamingBinaryOperatorParameterName,
+    Semicolon, ObjectThen, MinMaxComparison,
+    ArrayIntersect, BitwiseOperatorInConditional, SpecialGlobalVars,
+    NumericLiterals, IdenticalConditionalBranches,
+    UselessMethodDefinition,
 };
 use crate::config::Config;
 
@@ -394,6 +398,16 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(InheritException),
         Box::new(EachWithObjectArgument),
         Box::new(NamingBinaryOperatorParameterName),
+        // Session 27 cops
+        Box::new(Semicolon),
+        Box::new(ObjectThen),
+        Box::new(MinMaxComparison),
+        Box::new(ArrayIntersect),
+        Box::new(BitwiseOperatorInConditional),
+        Box::new(SpecialGlobalVars),
+        Box::new(NumericLiterals),
+        Box::new(IdenticalConditionalBranches),
+        Box::new(UselessMethodDefinition),
     ]
 }
 

@@ -221,3 +221,14 @@ pub use lint::inherit_exception::InheritException;
 pub use lint::each_with_object_argument::EachWithObjectArgument;
 
 pub use naming::binary_operator_parameter_name::BinaryOperatorParameterName as NamingBinaryOperatorParameterName;
+
+pub use style::semicolon::Semicolon;
+pub use style::object_then::ObjectThen;
+pub use style::min_max_comparison::MinMaxComparison;
+pub use style::array_intersect::ArrayIntersect;
+pub use style::bitwise_operator_in_conditional::BitwiseOperatorInConditional;
+pub use style::special_global_vars::SpecialGlobalVars;
+pub use style::numeric_literals::NumericLiterals;
+pub use style::identical_conditional_branches::IdenticalConditionalBranches;
+
+pub use lint::useless_method_definition::UselessMethodDefinition;
