@@ -1,0 +1,6 @@
+MAX = 100
+DEFAULT_TIMEOUT = 30
+
+# Later in the file...
+MAX = 200
+DEFAULT_TIMEOUT = 60
