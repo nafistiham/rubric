@@ -63,3 +63,4 @@ pub mod interpolation_check;
 pub mod symbol_conversion;
 pub mod rescue_type;
 pub mod constant_reassignment;
+pub mod mixed_case_range;
