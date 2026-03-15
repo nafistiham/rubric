@@ -1,0 +1,15 @@
+x + x
+y - y
+z * z
+a / a
+foo == foo
+bar != bar
+val < val
+num > num
+x <= x
+x >= x
+x && x
+x || x
+x & x
+x | x
+x ^ x

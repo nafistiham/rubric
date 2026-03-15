@@ -1,3 +1,4 @@
+pub mod binary_operator_with_identical_operands;
 pub mod unused_block_argument;
 pub mod useless_setter_call;
 pub mod ambiguous_regexp_literal;
