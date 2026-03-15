@@ -243,3 +243,13 @@ pub use style::comparable_clamp::ComparableClamp;
 pub use lint::interpolation_check::InterpolationCheck;
 pub use lint::symbol_conversion::SymbolConversion;
 pub use lint::rescue_type::RescueType;
+
+pub use style::collection_methods::CollectionMethods;
+pub use style::redundant_capital_w::RedundantCapitalW;
+pub use style::negated_if_else_condition::NegatedIfElseCondition;
+pub use style::map_compact_with_conditional_block::MapCompactWithConditionalBlock;
+pub use style::next::Next as StyleNext;
+pub use style::hash_conversion::HashConversion;
+pub use style::redundant_sort_by::RedundantSortBy;
+pub use naming::rescued_exceptions_variable_name::RescuedExceptionsVariableName as NamingRescuedExceptionsVariableName;
+pub use lint::constant_reassignment::ConstantReassignment;

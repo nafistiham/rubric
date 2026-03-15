@@ -80,6 +80,9 @@ use rubric_rules::{
     SymbolLiteral, SingleArgumentDig, LambdaCall,
     AsciiComments, FileNull, ComparableClamp,
     InterpolationCheck, SymbolConversion, RescueType,
+    CollectionMethods, RedundantCapitalW, NegatedIfElseCondition,
+    MapCompactWithConditionalBlock, StyleNext, HashConversion,
+    RedundantSortBy, NamingRescuedExceptionsVariableName, ConstantReassignment,
 };
 use crate::config::Config;
 
@@ -421,6 +424,16 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(InterpolationCheck),
         Box::new(SymbolConversion),
         Box::new(RescueType),
+        // Session 29 cops
+        Box::new(CollectionMethods),
+        Box::new(RedundantCapitalW),
+        Box::new(NegatedIfElseCondition),
+        Box::new(MapCompactWithConditionalBlock),
+        Box::new(StyleNext),
+        Box::new(HashConversion),
+        Box::new(RedundantSortBy),
+        Box::new(NamingRescuedExceptionsVariableName),
+        Box::new(ConstantReassignment),
     ]
 }
 
