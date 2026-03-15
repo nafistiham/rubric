@@ -101,3 +101,4 @@ pub mod redundant_capital_w;
 pub mod negated_if_else_condition;
 pub mod redundant_sort_by;
 pub mod parentheses_around_condition;
+pub mod nested_ternary_operator;
