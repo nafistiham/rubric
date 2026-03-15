@@ -263,3 +263,13 @@ pub use style::stabby_lambda_parentheses::StabbyLambdaParentheses;
 pub use style::multiline_ternary_operator::MultilineTernaryOperator;
 pub use style::slicing_with_range::SlicingWithRange;
 pub use lint::mixed_case_range::MixedCaseRange;
+
+pub use style::empty_case_condition::EmptyCaseCondition;
+pub use style::array_join::ArrayJoin;
+pub use style::or_assignment::OrAssignment;
+pub use style::global_std_stream::GlobalStdStream;
+pub use style::swap_values::SwapValues;
+pub use style::multiline_block_chain::MultilineBlockChain;
+pub use style::sole_nested_conditional::SoleNestedConditional;
+pub use style::case_like_if::CaseLikeIf;
+pub use style::trailing_body_on_method_definition::TrailingBodyOnMethodDefinition;

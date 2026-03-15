@@ -86,6 +86,8 @@ use rubric_rules::{
     ParenthesesAroundCondition, NestedTernaryOperator, DefWithParentheses,
     BinaryOperatorWithIdenticalOperands, CombinedComparison, StabbyLambdaParentheses,
     MultilineTernaryOperator, SlicingWithRange, MixedCaseRange,
+    EmptyCaseCondition, ArrayJoin, OrAssignment, GlobalStdStream, SwapValues,
+    MultilineBlockChain, SoleNestedConditional, CaseLikeIf, TrailingBodyOnMethodDefinition,
 };
 use crate::config::Config;
 
@@ -447,6 +449,16 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(MultilineTernaryOperator),
         Box::new(SlicingWithRange),
         Box::new(MixedCaseRange),
+        // Session 31 cops
+        Box::new(EmptyCaseCondition),
+        Box::new(ArrayJoin),
+        Box::new(OrAssignment),
+        Box::new(GlobalStdStream),
+        Box::new(SwapValues),
+        Box::new(MultilineBlockChain),
+        Box::new(SoleNestedConditional),
+        Box::new(CaseLikeIf),
+        Box::new(TrailingBodyOnMethodDefinition),
     ]
 }
 
