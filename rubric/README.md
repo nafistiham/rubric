@@ -6,7 +6,7 @@
 [![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/nafistiham/rubric/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](gem/LICENSE)
 
-Rubric is a drop-in replacement for Rubocop — same cop names, same `.rubocop.yml` migration path — but built in Rust for dramatically faster CI times.
+Rubric is a fast Ruby linter written in Rust — 150 cops, same naming as RuboCop, with a migration path from `.rubocop.yml`. Inspired by what Ruff did for Python.
 
 ```
 $ rubric check app/
@@ -22,15 +22,18 @@ app/services/payment.rb:3:1  [W] Style/FrozenStringLiteralComment  Missing froze
 
 ## Why Rubric?
 
-Rubocop is the standard. It's also slow — seconds on small projects, minutes on large ones. Rubric runs the same checks in milliseconds by processing files in parallel across all CPU cores and avoiding Ruby's startup overhead entirely.
+RuboCop is the standard. It's also slow — seconds on small projects, minutes on large ones. Rubric processes files in parallel across all CPU cores and skips Ruby's startup overhead entirely.
 
-| Project size | Rubocop | Rubric | Speedup |
-|---|---|---|---|
-| 100 files | ~8s | ~180ms | **44×** |
-| 500 files | ~35s | ~700ms | **50×** |
-| 2,000 files | ~140s | ~3s | **47×** |
+Measured on Apple M2 (arm64), RuboCop 1.85.1, cold start with one warmup run:
 
-*Measured on Apple M2, 8 cores. Your numbers will vary, but the gap won't.*
+| Project | Files | RuboCop | Rubric | Speedup |
+|---------|-------|---------|--------|---------|
+| sinatra | 147 | 809 ms | 68 ms | **11.9×** |
+| jekyll | 160 | 615 ms | 83 ms | **7.4×** |
+| rspec-core | 233 | 786 ms | 100 ms | **7.9×** |
+| activeadmin | 278 | 604 ms | 45 ms | **13.4×** |
+
+**Average: ~10× faster on cold start.** Each project uses its own config (rubric.toml mirroring .rubocop.yml).
 
 ---
 
@@ -141,6 +144,17 @@ enabled = true
 # UNKNOWN: Metrics/PerceivedComplexity (not yet implemented in Rubric)
 # UNKNOWN: Naming/MethodParameterName (not yet implemented in Rubric)
 ```
+
+---
+
+## Current Limitations
+
+Rubric is actively developed. Before adopting it, know what it is and isn't today:
+
+- **150 of ~450 RuboCop cops implemented.** The cops covered are the most commonly triggered ones. See [`docs/cops/README.md`](docs/cops/README.md) for the full list. Cops not yet implemented are silently skipped.
+- **No plugin system.** `rubocop-rails`, `rubocop-rspec`, `rubocop-performance`, and similar extensions are not supported yet. Projects that rely on these will miss those checks.
+- **`rubric migrate` generates a starting config, not a perfect one.** It maps cops that Rubric implements and comments out ones it doesn't. Style mismatches (e.g. `EnforcedStyle` options) may need manual tuning. Treat the output as a first draft.
+- **Scope-dependent rules are disabled by default.** Cops like `Lint/UnusedMethodArgument` require full Ruby scope analysis. They are implemented but off by default until an AST-backed version ships, to avoid false positives on common patterns.
 
 ---
 
