@@ -77,6 +77,9 @@ use rubric_rules::{
     ArrayIntersect, BitwiseOperatorInConditional, SpecialGlobalVars,
     NumericLiterals, IdenticalConditionalBranches,
     UselessMethodDefinition,
+    SymbolLiteral, SingleArgumentDig, LambdaCall,
+    AsciiComments, FileNull, ComparableClamp,
+    InterpolationCheck, SymbolConversion, RescueType,
 };
 use crate::config::Config;
 
@@ -408,6 +411,16 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(NumericLiterals),
         Box::new(IdenticalConditionalBranches),
         Box::new(UselessMethodDefinition),
+        // Session 28 cops
+        Box::new(SymbolLiteral),
+        Box::new(SingleArgumentDig),
+        Box::new(LambdaCall),
+        Box::new(AsciiComments),
+        Box::new(FileNull),
+        Box::new(ComparableClamp),
+        Box::new(InterpolationCheck),
+        Box::new(SymbolConversion),
+        Box::new(RescueType),
     ]
 }
 

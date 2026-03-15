@@ -232,3 +232,14 @@ pub use style::numeric_literals::NumericLiterals;
 pub use style::identical_conditional_branches::IdenticalConditionalBranches;
 
 pub use lint::useless_method_definition::UselessMethodDefinition;
+
+pub use style::symbol_literal::SymbolLiteral;
+pub use style::single_argument_dig::SingleArgumentDig;
+pub use style::lambda_call::LambdaCall;
+pub use style::ascii_comments::AsciiComments;
+pub use style::file_null::FileNull;
+pub use style::comparable_clamp::ComparableClamp;
+
+pub use lint::interpolation_check::InterpolationCheck;
+pub use lint::symbol_conversion::SymbolConversion;
+pub use lint::rescue_type::RescueType;
