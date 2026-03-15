@@ -58,3 +58,6 @@ pub mod safe_navigation_with_empty;
 pub mod inherit_exception;
 pub mod each_with_object_argument;
 pub mod useless_method_definition;
+pub mod interpolation_check;
+pub mod symbol_conversion;
+pub mod rescue_type;
