@@ -4,7 +4,7 @@ pub struct TrailingNewlines;
 
 impl Rule for TrailingNewlines {
     fn name(&self) -> &'static str {
-        "Layout/TrailingNewlines"
+        "Layout/TrailingEmptyLines"
     }
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {

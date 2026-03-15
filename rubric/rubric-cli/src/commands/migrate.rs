@@ -6,7 +6,7 @@ use std::path::Path;
 
 pub(crate) const KNOWN_COPS: &[&str] = &[
     "Layout/TrailingWhitespace",
-    "Layout/TrailingNewlines",
+    "Layout/TrailingEmptyLines",
     "Layout/IndentationWidth",
     "Layout/LineLength",
     "Layout/EmptyLines",
