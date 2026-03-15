@@ -42,7 +42,7 @@ impl Rule for SymbolConversion {
                         i += 1;
                     }
                     // After the closing quote, check if `.to_sym` follows
-                    if bytes[i..].starts_with(b".to_sym") {
+                    if i < bytes.len() && bytes[i..].starts_with(b".to_sym") {
                         let after = i + b".to_sym".len();
                         let after_ok = after >= bytes.len() || !is_word_char(bytes[after]);
                         if after_ok {
