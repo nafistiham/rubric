@@ -1,3 +1,5 @@
 target/
 gem/*.gem
 gem/pkg/
+internals/BENCHMARK.md
+internals/bench-compare.sh
