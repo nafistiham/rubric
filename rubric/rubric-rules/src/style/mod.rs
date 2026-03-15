@@ -1,3 +1,4 @@
+pub mod combined_comparison;
 pub mod class_and_module_children;
 pub mod documentation;
 pub mod empty_method;
@@ -102,3 +103,4 @@ pub mod negated_if_else_condition;
 pub mod redundant_sort_by;
 pub mod parentheses_around_condition;
 pub mod nested_ternary_operator;
+pub mod def_with_parentheses;
