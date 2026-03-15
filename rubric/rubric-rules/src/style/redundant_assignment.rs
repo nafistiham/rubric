@@ -73,8 +73,18 @@ impl Rule for RedundantAssignment {
             if let Some(var) = parse_local_assignment(line_a) {
                 let next_trimmed = line_b.trim();
 
+                // Skip if the assignment line has a trailing conditional modifier
+                // (e.g. `cmp = x if cond`) — the assignment is not guaranteed to run.
+                let has_trailing_cond = {
+                    let t = line_a.trim();
+                    // Look for ` if ` or ` unless ` after the `=`
+                    let eq_pos = t.find('=').unwrap_or(t.len());
+                    let rhs = &t[eq_pos..];
+                    rhs.contains(" if ") || rhs.contains(" unless ")
+                };
+
                 // Line B must be exactly the variable name (bare return of the var)
-                if next_trimmed == var {
+                if next_trimmed == var && !has_trailing_cond {
                     // Ensure the variable doesn't appear elsewhere in line_a beyond the LHS
                     // (this prevents false positives when the var is used in the RHS in a
                     // meaningful way — but actually we only want to check it's not used

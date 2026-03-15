@@ -25,9 +25,9 @@ fn is_snake_case(name: &str) -> bool {
         .or_else(|| name.strip_suffix('='))
         .unwrap_or(name);
 
-    // All chars must be lowercase letter, digit, or underscore
+    // All chars must be lowercase letter, digit, underscore, or non-ASCII (Unicode identifiers)
     base.chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || !c.is_ascii())
 }
 
 impl Rule for MethodName {
@@ -54,18 +54,18 @@ impl Rule for MethodName {
                 continue;
             };
 
-            // Skip `self.method_name` pattern — extract just the method name part
-            let method_part = if let Some(rest) = after_def.strip_prefix("self.") {
-                rest
-            } else {
-                after_def
-            };
+            // Extract raw token: up to `(`, ` `, `\t`, `;`, or end
+            let name_end = after_def
+                .find(|c: char| c == '(' || c == ' ' || c == '\t' || c == '\n' || c == ';')
+                .unwrap_or(after_def.len());
+            let raw_name = &after_def[..name_end];
 
-            // Extract method name: up to `(`, ` `, `\t`, or end
-            let name_end = method_part
-                .find(|c: char| c == '(' || c == ' ' || c == '\t' || c == '\n')
-                .unwrap_or(method_part.len());
-            let method_name = &method_part[..name_end];
+            // Strip receiver prefix: `self.method`, `obj.method` → take the part after the last `.`
+            let method_name = if let Some(dot) = raw_name.rfind('.') {
+                &raw_name[dot + 1..]
+            } else {
+                raw_name
+            };
 
             if method_name.is_empty() {
                 continue;

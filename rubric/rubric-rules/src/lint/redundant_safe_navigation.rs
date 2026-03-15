@@ -29,9 +29,13 @@ fn scan_line_for_violations(
                     j -= 1;
                 }
                 let preceding = bytes[j];
+                // Only flag when preceding character unambiguously indicates a
+                // literal that can never be nil. `]` and `}` are excluded because
+                // they can end a hash/array *access* (e.g. `x[k]&.m`) which CAN
+                // return nil, not just a literal.
                 let is_literal_receiver = matches!(
                     preceding,
-                    b'"' | b'\'' | b']' | b'}' | b'0'..=b'9'
+                    b'"' | b'\'' | b'0'..=b'9'
                 );
                 if is_literal_receiver {
                     let start = line_offset + i as u32;

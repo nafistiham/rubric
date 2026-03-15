@@ -37,16 +37,53 @@ impl Rule for ParenthesesAroundCondition {
                     continue;
                 }
 
-                // The `(` must not be a method call. A method-call `(` is
-                // immediately preceded by a word character (letter, digit, `_`,
-                // `?`, `!`) with no space in between. Here we already stripped
-                // any spaces with `trim_start()`, so if `after_kw` starts with
-                // `(` right after a keyword, it is a redundant condition paren.
-                //
-                // Additionally guard against `if (x) method_call(y)` — the
-                // `(` we are looking at is the first `(` after the keyword, not
-                // a subsequent method-call paren. That is fine since we matched
-                // on `after_kw.starts_with('(')`.
+                // Only flag when the parens wrap the ENTIRE condition.
+                // Find the matching `)` and verify:
+                // 1. Nothing significant follows it (sub-expression grouping → skip)
+                // 2. The interior does NOT contain a bare assignment (AllowSafeAssignment)
+                {
+                    let inner = &after_kw[1..]; // bytes after the `(`
+                    let bytes = inner.as_bytes();
+                    let mut depth = 1i32;
+                    let mut close_pos = None;
+                    let mut has_assignment = false;
+                    let mut j = 0;
+                    while j < bytes.len() {
+                        match bytes[j] {
+                            b'(' => depth += 1,
+                            b')' => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    close_pos = Some(j);
+                                    break;
+                                }
+                            }
+                            b'=' if depth == 1 => {
+                                let prev = if j > 0 { bytes[j - 1] } else { 0 };
+                                let next = bytes.get(j + 1).copied().unwrap_or(0);
+                                if !matches!(prev, b'!' | b'<' | b'>' | b'=')
+                                    && !matches!(next, b'=' | b'>')
+                                {
+                                    has_assignment = true;
+                                }
+                            }
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                    // AllowSafeAssignment: parens required around assignments.
+                    if has_assignment {
+                        continue;
+                    }
+                    // If matching `)` found, check what follows it.
+                    if let Some(cp) = close_pos {
+                        let after_close = inner[cp + 1..].trim_start();
+                        // Something non-trivial follows → parens are sub-expression.
+                        if !after_close.is_empty() && !after_close.starts_with('#') {
+                            continue;
+                        }
+                    }
+                }
 
                 // Find the byte offset of the `(` in the original line.
                 let indent = line.len() - trimmed.len();

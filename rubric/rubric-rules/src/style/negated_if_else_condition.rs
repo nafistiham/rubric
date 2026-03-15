@@ -9,6 +9,37 @@ fn is_negated_if(trimmed: &str) -> bool {
     trimmed.starts_with("if !") || trimmed.starts_with("if(!") || trimmed.starts_with("if !")
 }
 
+/// Returns true if the condition after `if !` is compound (has top-level `&&` or `||`).
+/// Rubocop only flags simple `if !expr` with else, not compound `if !a && b` where
+/// inverting would require de Morgan's law and may change semantics.
+fn is_compound_negated_condition(trimmed: &str) -> bool {
+    let cond = if let Some(rest) = trimmed.strip_prefix("if(") {
+        rest
+    } else if let Some(rest) = trimmed.strip_prefix("if ") {
+        rest
+    } else {
+        return false;
+    };
+    if !cond.starts_with('!') {
+        return false;
+    }
+    let bytes = cond.as_bytes();
+    let mut depth: i32 = 0;
+    let mut j = 0;
+    while j < bytes.len() {
+        match bytes[j] {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => { if depth > 0 { depth -= 1; } }
+            b'#' if depth == 0 => break,
+            b'&' if depth == 0 && bytes.get(j + 1).copied() == Some(b'&') => return true,
+            b'|' if depth == 0 && bytes.get(j + 1).copied() == Some(b'|') => return true,
+            _ => {}
+        }
+        j += 1;
+    }
+    false
+}
+
 /// Returns true if the trimmed line is `else` (standalone).
 fn is_else(trimmed: &str) -> bool {
     trimmed == "else"
@@ -62,7 +93,7 @@ impl Rule for NegatedIfElseCondition {
         let mut idx = 0;
         while idx < n {
             let trimmed = lines[idx].trim();
-            if is_negated_if(trimmed) {
+            if is_negated_if(trimmed) && !is_compound_negated_condition(trimmed) {
                 // Scan forward to find `else` at the same nesting level (depth=1).
                 // Depth starts at 1 because the `if` we found opened a block.
                 let if_line = idx;
@@ -70,12 +101,20 @@ impl Rule for NegatedIfElseCondition {
                 let mut found_else = false;
                 let mut j = idx + 1;
 
+                let mut has_elsif = false;
                 while j < n {
                     let t = lines[j].trim();
 
-                    if is_else(t) && depth == 1 {
-                        found_else = true;
-                        break;
+                    if depth == 1 {
+                        if is_else(t) {
+                            found_else = true;
+                            break;
+                        }
+                        // elsif makes this a multi-branch conditional — not invertible
+                        if t.starts_with("elsif") {
+                            has_elsif = true;
+                            break;
+                        }
                     }
 
                     if is_end(t) {
@@ -90,7 +129,7 @@ impl Rule for NegatedIfElseCondition {
                     j += 1;
                 }
 
-                if found_else {
+                if found_else && !has_elsif {
                     let line_start = ctx.line_start_offsets[if_line] as u32;
                     let line_end = line_start + lines[if_line].len() as u32;
                     diags.push(Diagnostic {

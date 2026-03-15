@@ -4,9 +4,14 @@ pub struct BinaryOperatorParameterName;
 
 /// Binary operators whose parameter should be named `other`.
 /// Ordered so that multi-char operators are checked before single-char prefixes.
+/// Binary operators whose parameter should be named `other`.
+/// Ordered so that multi-char operators are checked before single-char prefixes.
+/// NOTE: `[]` and `[]=` are NOT binary operators — they are indexer methods
+/// whose parameter is conventionally named `key`, `index`, etc. Rubocop does
+/// not enforce `other` for these.
 const BINARY_OPS: &[&str] = &[
     "<=>", "**", "!=", "<=", ">=", "<<", ">>", "==", "+", "-", "*", "/", "%", "&", "|", "^",
-    "<", ">", "[]", "[]=",
+    "<", ">",
 ];
 
 impl Rule for BinaryOperatorParameterName {

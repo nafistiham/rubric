@@ -53,8 +53,8 @@ impl Rule for SpecialGlobalVars {
                     {
                         let abs = search + rel;
 
-                        // Make sure this is not inside a string literal
-                        if !in_string_at(bytes, abs) {
+                        // Make sure this is not inside a string or percent literal
+                        if !in_string_at(bytes, abs) && !in_percent_literal_at(bytes, abs) {
                             // Ensure the character after the global is not alphanumeric or `_`
                             // (to avoid matching `$0` inside `$0abc` incorrectly for single-char vars)
                             let after = abs + needle.len();
@@ -114,6 +114,55 @@ fn in_string_at(bytes: &[u8], pos: usize) -> bool {
         i += 1;
     }
     in_str.is_some()
+}
+
+/// Returns true if position `pos` in `bytes` is inside a `%r`, `%w`, etc.
+/// percent literal (e.g. `%r!pattern!`, `%w(foo bar)`).
+fn in_percent_literal_at(bytes: &[u8], pos: usize) -> bool {
+    let mut i = 0;
+    while i + 2 < bytes.len() {
+        if bytes[i] == b'%' {
+            let kind = bytes[i + 1];
+            if matches!(kind, b'r' | b'w' | b'W' | b'i' | b'I' | b'q' | b'Q' | b'x' | b's') {
+                let open = bytes[i + 2];
+                let close = match open {
+                    b'(' => b')',
+                    b'[' => b']',
+                    b'{' => b'}',
+                    b'<' => b'>',
+                    _ => open,
+                };
+                let lit_start = i + 3;
+                // Find the matching close delimiter
+                let mut j = lit_start;
+                while j < bytes.len() {
+                    if bytes[j] == b'\\' {
+                        j += 2;
+                        continue;
+                    }
+                    if bytes[j] == close {
+                        let lit_end = j;
+                        if pos > i && pos <= lit_end {
+                            return true;
+                        }
+                        i = j + 1;
+                        break;
+                    }
+                    j += 1;
+                }
+                if j >= bytes.len() {
+                    // Unclosed literal — treat remainder as inside literal
+                    if pos > i {
+                        return true;
+                    }
+                    return false;
+                }
+                continue;
+            }
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Returns the index of the comment character `#` on the line, ignoring

@@ -10,7 +10,23 @@ fn is_guard_clause(line: &str) -> bool {
     if trimmed.starts_with('#') {
         return false;
     }
-    GUARD_PREFIXES.iter().any(|p| trimmed.starts_with(p))
+    if !GUARD_PREFIXES.iter().any(|p| trimmed.starts_with(p)) {
+        return false;
+    }
+    // A guard clause that is a multi-line statement continuation should not be
+    // flagged — the statement hasn't finished on this line.
+    // Continuation indicators: trailing `,`, `\`, unclosed `[`, `(`, heredoc `<<`.
+    if trimmed.ends_with(',')
+        || trimmed.ends_with('\\')
+        || trimmed.ends_with('[')
+        || trimmed.ends_with('(')
+        || trimmed.contains("<<~")
+        || trimmed.contains("<<-")
+        || (trimmed.contains("<<") && !trimmed.contains("<<>>"))
+    {
+        return false;
+    }
+    true
 }
 
 /// Returns true if the line is one that would terminate a guard clause section
@@ -59,6 +75,18 @@ impl Rule for EmptyLineAfterGuardClause {
             // If next line is a terminator, we're fine
             if is_terminator(next) {
                 continue;
+            }
+
+            // If next non-blank, non-comment line is also a guard clause or
+            // terminator, no blank line is needed (consecutive guards are OK).
+            let next_meaningful = (i + 1..n)
+                .map(|k| lines[k].trim())
+                .find(|t| !t.is_empty() && !t.starts_with('#'));
+            if let Some(t) = next_meaningful {
+                let fake_line = format!("  {}", t);
+                if is_guard_clause(&fake_line) || is_terminator(&fake_line) {
+                    continue;
+                }
             }
 
             let line_start = ctx.line_start_offsets[i];

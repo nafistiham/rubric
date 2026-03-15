@@ -73,9 +73,34 @@ impl Rule for RedundantInterpolation {
             let n = bytes.len();
             let mut i = 0usize;
             let mut in_single_quote = false;
+            let mut in_percent_lit = false;
+            let mut percent_close: u8 = 0;
+            let mut percent_open: u8 = 0;
+            let mut percent_depth: i32 = 0;
 
             while i < n {
                 let b = bytes[i];
+
+                // Track percent string literals: %(, %Q(, %w(, %r!, etc.
+                // When inside, `"` chars are literal content, not string delimiters.
+                if in_percent_lit {
+                    if b == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if percent_open != percent_close {
+                        // Paired delimiter — track depth
+                        if b == percent_open { percent_depth += 1; }
+                        if b == percent_close {
+                            percent_depth -= 1;
+                            if percent_depth == 0 { in_percent_lit = false; }
+                        }
+                    } else if b == percent_close {
+                        in_percent_lit = false;
+                    }
+                    i += 1;
+                    continue;
+                }
 
                 // Track single-quoted strings (no interpolation inside)
                 if in_single_quote {
@@ -90,6 +115,34 @@ impl Rule for RedundantInterpolation {
 
                 match b {
                     b'#' => break, // inline comment — stop scanning
+                    b'%' if i + 1 < n => {
+                        // Detect percent literals: %(, %Q(, %q(, %w(, %W(, %r!, etc.
+                        let next = bytes[i + 1];
+                        let (open, advance) =
+                            if matches!(next, b'Q' | b'q' | b'W' | b'w' | b'I' | b'i' | b'r' | b'x' | b's') {
+                                (bytes.get(i + 2).copied().unwrap_or(0), 3usize)
+                            } else if matches!(next, b'(' | b'[' | b'{' | b'<' | b'!' | b'|' | b'/' | b'@' | b'`') {
+                                (next, 2usize)
+                            } else {
+                                (0, 1usize)
+                            };
+                        if open != 0 {
+                            let close = match open {
+                                b'(' => b')',
+                                b'[' => b']',
+                                b'{' => b'}',
+                                b'<' => b'>',
+                                other => other,
+                            };
+                            in_percent_lit = true;
+                            percent_open = open;
+                            percent_close = close;
+                            percent_depth = 1;
+                            i += advance;
+                            continue;
+                        }
+                        i += 1;
+                    }
                     b'\'' => {
                         in_single_quote = true;
                         i += 1;

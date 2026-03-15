@@ -54,15 +54,36 @@ impl Rule for BitwiseOperatorInConditional {
 
 /// Returns true when `condition` contains a bare `&` or `|` that is not part
 /// of `&&`, `||`, `&.`, `&=`, or `|=`.
+/// Ignores `|` inside block parameter lists `{ |x| ... }` or `do |x|`.
 fn has_single_bitwise_operator(condition: &str) -> bool {
     let bytes = condition.as_bytes();
     let len = bytes.len();
     let mut i = 0;
+    let mut brace_depth: i32 = 0;
+    let mut in_block_params = false; // true between the opening and closing `|` of block params
 
     while i < len {
         let b = bytes[i];
 
-        if b == b'&' {
+        match b {
+            b'{' => { brace_depth += 1; in_block_params = false; }
+            b'}' => { if brace_depth > 0 { brace_depth -= 1; } in_block_params = false; }
+            b'|' if brace_depth > 0 => {
+                // Inside a block `{...}`: `|` is a block parameter delimiter, skip
+                in_block_params = !in_block_params;
+                i += 1;
+                continue;
+            }
+            b'|' if in_block_params => {
+                // Inside a do-block param list: closing `|`
+                in_block_params = false;
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+
+        if b == b'&' && brace_depth == 0 {
             let prev_is_amp = i > 0 && bytes[i - 1] == b'&';
             let next_is_amp = i + 1 < len && bytes[i + 1] == b'&';
             let next_is_dot = i + 1 < len && bytes[i + 1] == b'.';
@@ -71,7 +92,7 @@ fn has_single_bitwise_operator(condition: &str) -> bool {
             if !prev_is_amp && !next_is_amp && !next_is_dot && !next_is_eq {
                 return true;
             }
-        } else if b == b'|' {
+        } else if b == b'|' && brace_depth == 0 && !in_block_params {
             let prev_is_pipe = i > 0 && bytes[i - 1] == b'|';
             let next_is_pipe = i + 1 < len && bytes[i + 1] == b'|';
             let next_is_eq = i + 1 < len && bytes[i + 1] == b'=';
