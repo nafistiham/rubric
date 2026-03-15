@@ -2,36 +2,67 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct Semicolon;
 
-/// Scan through a line byte-by-byte tracking string and comment state.
-/// Returns the position of the first `;` found outside a string or comment,
+/// Scan through a line byte-by-byte tracking string, comment, and regex state.
+/// Returns the position of the first `;` found outside a string, regex, or comment,
 /// or `None` if no such semicolon exists.
 fn first_semicolon_outside_string_comment(line: &str) -> Option<usize> {
     let bytes = line.as_bytes();
-    let mut in_str: Option<u8> = None;
+    let mut in_delimited: Option<u8> = None; // inside "...", '...', or /regex/ (delimiter byte)
+    let mut in_percent_regex = false;          // inside %r{...} (curly brace counted)
+    let mut brace_depth: i32 = 0;
     let mut i = 0;
 
     while i < bytes.len() {
-        match in_str {
-            Some(_) if bytes[i] == b'\\' => {
-                // Skip escaped character
-                i += 2;
+        // Inside %r{...}
+        if in_percent_regex {
+            match bytes[i] {
+                b'\\' => { i += 2; continue; }
+                b'{' => { brace_depth += 1; }
+                b'}' if brace_depth > 0 => { brace_depth -= 1; }
+                b'}' => { in_percent_regex = false; }
+                _ => {}
+            }
+            i += 1;
+            continue;
+        }
+
+        // Inside "...", '...', or /regex/
+        if let Some(delim) = in_delimited {
+            match bytes[i] {
+                b'\\' => { i += 2; continue; }
+                b if b == delim => { in_delimited = None; }
+                _ => {}
+            }
+            i += 1;
+            continue;
+        }
+
+        // Not inside any literal
+        match bytes[i] {
+            b'\\' => { i += 2; continue; }
+            b'"' | b'\'' => { in_delimited = Some(bytes[i]); }
+            // %r{...} regex literal
+            b'%' if bytes.get(i + 1).copied() == Some(b'r')
+                  && bytes.get(i + 2).copied() == Some(b'{') => {
+                in_percent_regex = true;
+                brace_depth = 0;
+                i += 3;
                 continue;
             }
-            Some(d) if bytes[i] == d => {
-                in_str = None;
+            // /regex/ — only if preceded by `[`, `(`, `,`, `=`, `!`, `|`, `&` or start of line
+            b'/' => {
+                let prev = bytes[..i].iter().rposition(|&b| b != b' ' && b != b'\t')
+                    .map(|p| bytes[p]);
+                let is_regex_ctx = matches!(prev, None
+                    | Some(b'[') | Some(b'(') | Some(b',') | Some(b'=')
+                    | Some(b'!') | Some(b'|') | Some(b'&') | Some(b'?') | Some(b':'));
+                if is_regex_ctx {
+                    in_delimited = Some(b'/');
+                }
             }
-            Some(_) => {}
-            None if bytes[i] == b'"' || bytes[i] == b'\'' => {
-                in_str = Some(bytes[i]);
-            }
-            None if bytes[i] == b'#' => {
-                // Real comment — nothing after this is code
-                return None;
-            }
-            None if bytes[i] == b';' => {
-                return Some(i);
-            }
-            None => {}
+            b'#' => return None, // comment
+            b';' => return Some(i),
+            _ => {}
         }
         i += 1;
     }
