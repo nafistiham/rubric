@@ -53,5 +53,6 @@ pub mod space_before_block_braces;
 pub mod multiline_operation_indentation;
 pub mod empty_line_after_magic_comment;
 pub mod space_before_comma;
+pub mod space_before_first_arg;
 pub mod empty_lines_around_access_modifier;
 pub mod empty_line_after_guard_clause;

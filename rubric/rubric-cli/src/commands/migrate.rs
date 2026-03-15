@@ -102,6 +102,7 @@ pub(crate) const KNOWN_COPS: &[&str] = &[
     "Layout/HeredocIndentation",
     "Layout/IndentationStyle",
     "Layout/SpaceBeforeSemicolon",
+    "Layout/SpaceBeforeFirstArg",
     // New Style cops
     "Style/ClassAndModuleChildren",
     "Style/Documentation",
