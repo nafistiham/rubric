@@ -253,3 +253,13 @@ pub use style::hash_conversion::HashConversion;
 pub use style::redundant_sort_by::RedundantSortBy;
 pub use naming::rescued_exceptions_variable_name::RescuedExceptionsVariableName as NamingRescuedExceptionsVariableName;
 pub use lint::constant_reassignment::ConstantReassignment;
+
+pub use style::parentheses_around_condition::ParenthesesAroundCondition;
+pub use style::nested_ternary_operator::NestedTernaryOperator;
+pub use style::def_with_parentheses::DefWithParentheses;
+pub use lint::binary_operator_with_identical_operands::BinaryOperatorWithIdenticalOperands;
+pub use style::combined_comparison::CombinedComparison;
+pub use style::stabby_lambda_parentheses::StabbyLambdaParentheses;
+pub use style::multiline_ternary_operator::MultilineTernaryOperator;
+pub use style::slicing_with_range::SlicingWithRange;
+pub use lint::mixed_case_range::MixedCaseRange;

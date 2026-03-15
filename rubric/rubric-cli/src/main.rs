@@ -83,6 +83,9 @@ use rubric_rules::{
     CollectionMethods, RedundantCapitalW, NegatedIfElseCondition,
     MapCompactWithConditionalBlock, StyleNext, HashConversion,
     RedundantSortBy, NamingRescuedExceptionsVariableName, ConstantReassignment,
+    ParenthesesAroundCondition, NestedTernaryOperator, DefWithParentheses,
+    BinaryOperatorWithIdenticalOperands, CombinedComparison, StabbyLambdaParentheses,
+    MultilineTernaryOperator, SlicingWithRange, MixedCaseRange,
 };
 use crate::config::Config;
 
@@ -434,6 +437,16 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(RedundantSortBy),
         Box::new(NamingRescuedExceptionsVariableName),
         Box::new(ConstantReassignment),
+        // Session 30 cops
+        Box::new(ParenthesesAroundCondition),
+        Box::new(NestedTernaryOperator),
+        Box::new(DefWithParentheses),
+        Box::new(BinaryOperatorWithIdenticalOperands),
+        Box::new(CombinedComparison),
+        Box::new(StabbyLambdaParentheses),
+        Box::new(MultilineTernaryOperator),
+        Box::new(SlicingWithRange),
+        Box::new(MixedCaseRange),
     ]
 }
 
