@@ -1,0 +1,5 @@
+data.dig(:key)
+hash.dig("name")
+obj.dig(0)
+config.dig(:timeout)
+response.dig("status")
