@@ -33,7 +33,9 @@ Measured on Apple M2 (arm64), RuboCop 1.85.1, cold start with one warmup run:
 | rspec-core | 233 | 786 ms | 100 ms | **7.9×** |
 | activeadmin | 278 | 604 ms | 45 ms | **13.4×** |
 
-**Average: ~10× faster on cold start.** Each project uses its own config (rubric.toml mirroring .rubocop.yml).
+**Average: ~10× faster on cold start** (no warmup, no daemon). Each project uses its own config (rubric.toml mirroring .rubocop.yml).
+
+RuboCop's `--server` mode (persistent daemon) reduces its cold-start overhead but still runs ~3× slower than Rubric on the same projects. In CI — where `--server` has no effect — the full 10× advantage applies.
 
 ---
 
