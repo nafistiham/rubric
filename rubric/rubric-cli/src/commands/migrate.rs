@@ -228,6 +228,56 @@ fn load_enabled_from_yaml(
     result
 }
 
+/// Load per-cop exclude lists and enabled overrides from a `.rubocop_todo.yml` file.
+/// Returns a map of cop_name → (Option<enabled_override>, Vec<exclude_paths>).
+fn load_todo(todo_path: &Path) -> HashMap<String, (Option<bool>, Vec<String>)> {
+    let content = match std::fs::read_to_string(todo_path) {
+        Ok(c) => c,
+        Err(_) => return HashMap::new(),
+    };
+    let yaml: serde_yaml::Value = match serde_yaml::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return HashMap::new(),
+    };
+    let mapping = match yaml.as_mapping() {
+        Some(m) => m,
+        None => return HashMap::new(),
+    };
+
+    let mut result = HashMap::new();
+    for (key, value) in mapping {
+        let cop_name = match key.as_str() {
+            Some(s) => s,
+            None => continue,
+        };
+        if matches!(cop_name, "AllCops" | "inherit_from" | "require" | "inherit_gem") {
+            continue;
+        }
+        let enabled_override = value.get("Enabled").and_then(|v| v.as_bool());
+        let excludes: Vec<String> = value
+            .get("Exclude")
+            .and_then(|v| v.as_sequence())
+            .map(|seq| seq.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        result.insert(cop_name.to_string(), (enabled_override, excludes));
+    }
+    result
+}
+
+/// Format a TOML block for a single cop rule.
+fn format_rule_block(cop_name: &str, enabled: bool, excludes: &[String]) -> String {
+    let mut block = format!("[rules.\"{cop_name}\"]\nenabled = {enabled}");
+    if !excludes.is_empty() {
+        let list = excludes
+            .iter()
+            .map(|p| format!("\"{}\"", p))
+            .collect::<Vec<_>>()
+            .join(", ");
+        block.push_str(&format!("\nexclude = [{list}]"));
+    }
+    block
+}
+
 pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
     let content = std::fs::read_to_string(rubocop_path)
         .with_context(|| format!("Could not read {}", rubocop_path.display()))?;
@@ -268,8 +318,18 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
         }
     }
 
+    // Load .rubocop_todo.yml if present alongside .rubocop.yml
+    let todo_path = rubocop_dir.join(".rubocop_todo.yml");
+    let todo_data = if todo_path.exists() {
+        load_todo(&todo_path)
+    } else {
+        HashMap::new()
+    };
+
     let mut known_lines = Vec::<String>::new();
     let mut unknown_lines = Vec::<String>::new();
+    // Track which cops we've already emitted so we can process todo-only cops afterward
+    let mut emitted: HashSet<String> = HashSet::new();
 
     for (key, value) in mapping {
         let cop_name = match key.as_str() {
@@ -287,10 +347,14 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
                 .get("Enabled")
                 .and_then(|v| v.as_bool())
                 .or_else(|| all_enabled.get(cop_name).copied())
-                .unwrap_or(true); // RuboCop defaults to enabled when key is absent
-            known_lines.push(format!(
-                "[rules.\"{cop_name}\"]\nenabled = {enabled}"
-            ));
+                .unwrap_or(true);
+            let (todo_enabled_opt, todo_excludes) = todo_data
+                .get(cop_name)
+                .map(|(e, x)| (*e, x.clone()))
+                .unwrap_or((None, vec![]));
+            let final_enabled = todo_enabled_opt.unwrap_or(enabled);
+            known_lines.push(format_rule_block(cop_name, final_enabled, &todo_excludes));
+            emitted.insert(cop_name.to_string());
         } else {
             unknown_lines.push(format!(
                 "# UNKNOWN: {cop_name} (not yet implemented in Rubric)"
@@ -300,16 +364,32 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
 
     // Emit cops that are only in inherited files (not in top-level .rubocop.yml)
     for (cop_name, enabled) in &all_enabled {
-        // Skip if already emitted from the top-level file
         if mapping.contains_key(cop_name.as_str()) {
             continue;
         }
-        // Skip non-cop top-level keys
         if matches!(cop_name.as_str(), "AllCops" | "inherit_from" | "require" | "inherit_gem") {
             continue;
         }
         if KNOWN_COPS.contains(&cop_name.as_str()) {
-            known_lines.push(format!("[rules.\"{cop_name}\"]\nenabled = {enabled}"));
+            let (todo_enabled_opt, todo_excludes) = todo_data
+                .get(cop_name.as_str())
+                .map(|(e, x)| (*e, x.clone()))
+                .unwrap_or((None, vec![]));
+            let final_enabled = todo_enabled_opt.unwrap_or(*enabled);
+            known_lines.push(format_rule_block(cop_name, final_enabled, &todo_excludes));
+            emitted.insert(cop_name.clone());
+        }
+    }
+
+    // Emit cops present only in .rubocop_todo.yml (auto-disabled or file-excluded defaults)
+    for (cop_name, (todo_enabled_opt, todo_excludes)) in &todo_data {
+        if emitted.contains(cop_name) {
+            continue;
+        }
+        if KNOWN_COPS.contains(&cop_name.as_str()) {
+            // Default enabled = true unless todo explicitly disables
+            let final_enabled = todo_enabled_opt.unwrap_or(true);
+            known_lines.push(format_rule_block(cop_name, final_enabled, todo_excludes));
         }
     }
 
@@ -347,6 +427,9 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
         "  {} cops not yet implemented (commented out)",
         unknown_lines.len()
     );
+    if !todo_data.is_empty() {
+        println!("  .rubocop_todo.yml merged ({} cops)", todo_data.len());
+    }
 
     Ok(())
 }
@@ -463,6 +546,83 @@ Layout/TrailingWhitespace:
         let output = fs::read_to_string(&rubric_toml).unwrap();
         assert!(!output.contains("AllCops"));
         assert!(output.contains("[rules.\"Layout/TrailingWhitespace\"]"));
+    }
+
+    #[test]
+    fn todo_excludes_are_merged() {
+        let dir = TempDir::new().unwrap();
+        let rubocop_yml = dir.path().join(".rubocop.yml");
+        let rubocop_todo = dir.path().join(".rubocop_todo.yml");
+        let rubric_toml = dir.path().join("rubric.toml");
+
+        fs::write(
+            &rubocop_yml,
+            "Layout/TrailingWhitespace:\n  Enabled: true\n",
+        ).unwrap();
+        fs::write(
+            &rubocop_todo,
+            "Layout/TrailingWhitespace:\n  Exclude:\n    - 'app/foo.rb'\n    - 'spec/bar_spec.rb'\n",
+        ).unwrap();
+
+        run(&rubocop_yml, &rubric_toml).unwrap();
+
+        let output = fs::read_to_string(&rubric_toml).unwrap();
+        assert!(
+            output.contains("exclude = [\"app/foo.rb\", \"spec/bar_spec.rb\"]"),
+            "expected exclude list from todo, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn todo_enabled_false_overrides_main_config() {
+        let dir = TempDir::new().unwrap();
+        let rubocop_yml = dir.path().join(".rubocop.yml");
+        let rubocop_todo = dir.path().join(".rubocop_todo.yml");
+        let rubric_toml = dir.path().join("rubric.toml");
+
+        fs::write(
+            &rubocop_yml,
+            "Layout/TrailingWhitespace:\n  Enabled: true\n",
+        ).unwrap();
+        fs::write(
+            &rubocop_todo,
+            "Layout/TrailingWhitespace:\n  Enabled: false\n",
+        ).unwrap();
+
+        run(&rubocop_yml, &rubric_toml).unwrap();
+
+        let output = fs::read_to_string(&rubric_toml).unwrap();
+        assert!(
+            output.contains("[rules.\"Layout/TrailingWhitespace\"]\nenabled = false"),
+            "expected todo Enabled:false to override, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn todo_only_known_cops_are_emitted() {
+        let dir = TempDir::new().unwrap();
+        let rubocop_yml = dir.path().join(".rubocop.yml");
+        let rubocop_todo = dir.path().join(".rubocop_todo.yml");
+        let rubric_toml = dir.path().join("rubric.toml");
+
+        // .rubocop.yml doesn't mention TrailingWhitespace, but todo does
+        fs::write(&rubocop_yml, "AllCops:\n  TargetRubyVersion: 3.2\n").unwrap();
+        fs::write(
+            &rubocop_todo,
+            "Layout/TrailingWhitespace:\n  Exclude:\n    - 'generated/foo.rb'\n",
+        ).unwrap();
+
+        run(&rubocop_yml, &rubric_toml).unwrap();
+
+        let output = fs::read_to_string(&rubric_toml).unwrap();
+        assert!(
+            output.contains("[rules.\"Layout/TrailingWhitespace\"]"),
+            "expected todo-only cop to be emitted, got:\n{output}"
+        );
+        assert!(
+            output.contains("exclude = [\"generated/foo.rb\"]"),
+            "expected exclude from todo-only cop, got:\n{output}"
+        );
     }
 
     #[test]
