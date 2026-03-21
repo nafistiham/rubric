@@ -136,12 +136,19 @@ Real bugs and suspicious patterns. No auto-fix — these need human review.
 rubric migrate
 ```
 
-Reads `.rubocop.yml` and writes `rubric.toml`. Cops that Rubric implements are mapped directly. Cops that Rubric doesn't implement yet are preserved as comments so you don't lose configuration.
+Reads `.rubocop.yml` and writes `rubric.toml`. If `.rubocop_todo.yml` exists in the same directory, it is merged automatically — per-cop `Exclude:` lists and `Enabled: false` entries carry over, so your existing violation suppressions are preserved.
+
+Cops that Rubric implements are mapped directly. Cops that Rubric doesn't implement yet are preserved as comments so you don't lose configuration.
 
 ```toml
 # rubric.toml (generated)
 [rules."Style/StringLiterals"]
 enabled = true
+
+# Exclude list from .rubocop_todo.yml
+[rules."Layout/TrailingWhitespace"]
+enabled = true
+exclude = ["app/legacy/old_file.rb", "db/schema.rb"]
 
 # UNKNOWN: Metrics/PerceivedComplexity (not yet implemented in Rubric)
 # UNKNOWN: Naming/MethodParameterName (not yet implemented in Rubric)
@@ -155,7 +162,7 @@ Rubric is actively developed. Before adopting it, know what it is and isn't toda
 
 - **150 of ~450 RuboCop cops implemented.** The cops covered are the most commonly triggered ones. See [`docs/cops/README.md`](docs/cops/README.md) for the full list. Cops not yet implemented are silently skipped.
 - **No plugin system.** `rubocop-rails`, `rubocop-rspec`, `rubocop-performance`, and similar extensions are not supported yet. Projects that rely on these will miss those checks.
-- **`rubric migrate` generates a starting config, not a perfect one.** It maps cops that Rubric implements and comments out ones it doesn't. Style mismatches (e.g. `EnforcedStyle` options) may need manual tuning. Treat the output as a first draft.
+- **`rubric migrate` generates a starting config, not a perfect one.** It maps cops Rubric implements, merges your `.rubocop_todo.yml` suppressions, and comments out unimplemented cops. `EnforcedStyle` options may need manual tuning. Treat the output as a first draft.
 - **Scope-dependent rules are disabled by default.** Cops like `Lint/UnusedMethodArgument` require full Ruby scope analysis. They are implemented but off by default until an AST-backed version ships, to avoid false positives on common patterns.
 
 ---
