@@ -85,7 +85,7 @@ fn extract_heredoc_terminator(line: &str) -> Option<String> {
 
 impl Rule for DebuggerStatement {
     fn name(&self) -> &'static str {
-        "Lint/DebuggerStatement"
+        "Lint/Debugger"
     }
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {

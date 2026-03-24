@@ -159,6 +159,7 @@ pub(crate) const KNOWN_COPS: &[&str] = &[
     "Lint/UriEscapeUnescape",
     "Lint/UselessElseWithoutRescue",
     "Lint/Void",
+    "Lint/Debugger",
 ];
 
 /// Recursively load cop `Enabled` settings from a rubocop yaml file and all
@@ -264,9 +265,25 @@ fn load_todo(todo_path: &Path) -> HashMap<String, (Option<bool>, Vec<String>)> {
     result
 }
 
+/// Cops that support `EnforcedStyle` migration. Only these get an `enforced_style` field.
+const ENFORCED_STYLE_COPS: &[&str] = &[
+    "Style/StringLiterals",
+    "Layout/SpaceAroundEqualsInParameterDefault",
+];
+
 /// Format a TOML block for a single cop rule.
-fn format_rule_block(cop_name: &str, enabled: bool, excludes: &[String]) -> String {
+fn format_rule_block(
+    cop_name: &str,
+    enabled: bool,
+    excludes: &[String],
+    enforced_style: Option<&str>,
+) -> String {
     let mut block = format!("[rules.\"{cop_name}\"]\nenabled = {enabled}");
+    if let Some(style) = enforced_style {
+        if ENFORCED_STYLE_COPS.contains(&cop_name) {
+            block.push_str(&format!("\nenforced_style = \"{style}\""));
+        }
+    }
     if !excludes.is_empty() {
         let list = excludes
             .iter()
@@ -348,12 +365,29 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
                 .and_then(|v| v.as_bool())
                 .or_else(|| all_enabled.get(cop_name).copied())
                 .unwrap_or(true);
+            let enforced_style = value
+                .get("EnforcedStyle")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            // Per-cop Exclude from the main .rubocop.yml
+            let main_excludes: Vec<String> = value
+                .get("Exclude")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| seq.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
             let (todo_enabled_opt, todo_excludes) = todo_data
                 .get(cop_name)
                 .map(|(e, x)| (*e, x.clone()))
                 .unwrap_or((None, vec![]));
             let final_enabled = todo_enabled_opt.unwrap_or(enabled);
-            known_lines.push(format_rule_block(cop_name, final_enabled, &todo_excludes));
+            // Merge excludes: main config first, then todo (deduplicated)
+            let mut all_excludes = main_excludes;
+            for ex in todo_excludes {
+                if !all_excludes.contains(&ex) {
+                    all_excludes.push(ex);
+                }
+            }
+            known_lines.push(format_rule_block(cop_name, final_enabled, &all_excludes, enforced_style.as_deref()));
             emitted.insert(cop_name.to_string());
         } else {
             unknown_lines.push(format!(
@@ -376,7 +410,7 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
                 .map(|(e, x)| (*e, x.clone()))
                 .unwrap_or((None, vec![]));
             let final_enabled = todo_enabled_opt.unwrap_or(*enabled);
-            known_lines.push(format_rule_block(cop_name, final_enabled, &todo_excludes));
+            known_lines.push(format_rule_block(cop_name, final_enabled, &todo_excludes, None));
             emitted.insert(cop_name.clone());
         }
     }
@@ -389,7 +423,7 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
         if KNOWN_COPS.contains(&cop_name.as_str()) {
             // Default enabled = true unless todo explicitly disables
             let final_enabled = todo_enabled_opt.unwrap_or(true);
-            known_lines.push(format_rule_block(cop_name, final_enabled, todo_excludes));
+            known_lines.push(format_rule_block(cop_name, final_enabled, todo_excludes, None));
         }
     }
 

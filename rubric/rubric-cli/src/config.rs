@@ -17,6 +17,8 @@ struct RawRuleConfig {
     exclude: Vec<String>,
     /// Maximum line length (for Layout/LineLength).
     max: Option<u64>,
+    /// Style enforcement string (e.g. "double_quotes", "no_space").
+    enforced_style: Option<String>,
 }
 
 /// Intermediate struct that mirrors the raw TOML layout.
@@ -63,6 +65,8 @@ pub struct RuleConfig {
     pub exclude: Vec<String>,
     /// Maximum line length override (for Layout/LineLength).
     pub max: Option<u64>,
+    /// Style enforcement string (e.g. "double_quotes", "no_space").
+    pub enforced_style: Option<String>,
 }
 
 #[derive(Debug)]
@@ -131,7 +135,7 @@ impl Config {
         };
 
         let rules = raw.rules.into_iter()
-            .map(|(k, v)| (k, RuleConfig { enabled: v.enabled, exclude: v.exclude, max: v.max }))
+            .map(|(k, v)| (k, RuleConfig { enabled: v.enabled, exclude: v.exclude, max: v.max, enforced_style: v.enforced_style }))
             .collect();
 
         Ok(Self {

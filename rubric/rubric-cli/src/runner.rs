@@ -277,7 +277,7 @@ mod tests {
         // Double-quoted strings without interpolation should be flagged
         std::fs::write(&f1, "x = \"hello\"\n").unwrap();
 
-        let rules: Vec<Box<dyn Rule + Send + Sync>> = vec![Box::new(StringLiterals)];
+        let rules: Vec<Box<dyn Rule + Send + Sync>> = vec![Box::new(StringLiterals::default())];
         let files = vec![f1.clone()];
         let results = run_all_files(&files, &rules);
 

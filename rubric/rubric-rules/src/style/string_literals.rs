@@ -1,6 +1,18 @@
 use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
-pub struct StringLiterals;
+/// `Style/StringLiterals` — enforces consistent string quoting style.
+///
+/// `double_quotes: false` (default) → prefer single-quoted strings.
+/// `double_quotes: true`  → prefer double-quoted strings.
+pub struct StringLiterals {
+    pub double_quotes: bool,
+}
+
+impl Default for StringLiterals {
+    fn default() -> Self {
+        Self { double_quotes: false }
+    }
+}
 
 impl Rule for StringLiterals {
     fn name(&self) -> &'static str {
@@ -24,37 +36,51 @@ impl Rule for StringLiterals {
             return vec![];
         }
         let node_src = &src_bytes[start..end];
-
-        // Only flag double-quoted strings (not heredocs, %q{}, etc.)
-        if node_src.first() != Some(&b'"') {
-            return vec![];
-        }
-
-        // Content between the quotes
         if node_src.len() < 2 {
             return vec![];
         }
-        let content = &node_src[1..node_src.len() - 1];
 
-        // Guard against string segments inside interpolation (child nodes of InterpolatedStringNode)
-        if content.windows(2).any(|w| w == b"#{") {
-            return vec![];
-        }
+        if self.double_quotes {
+            // Prefer double-quoted: flag single-quoted strings
+            if node_src.first() != Some(&b'\'') {
+                return vec![];
+            }
+            let content = &node_src[1..node_src.len() - 1];
+            // Skip if it contains a double-quote (would need escaping)
+            if content.contains(&b'"') {
+                return vec![];
+            }
+            vec![Diagnostic {
+                rule: self.name(),
+                message: "Prefer double-quoted strings unless the string contains double quotes.".into(),
+                range: TextRange::new(start as u32, end as u32),
+                severity: Severity::Warning,
+            }]
+        } else {
+            // Prefer single-quoted: flag double-quoted strings (default)
+            if node_src.first() != Some(&b'"') {
+                return vec![];
+            }
+            let content = &node_src[1..node_src.len() - 1];
 
-        // Contains single quote -> can't convert
-        if content.contains(&b'\'') {
-            return vec![];
+            // Guard against string segments inside interpolation (child nodes of InterpolatedStringNode)
+            if content.windows(2).any(|w| w == b"#{") {
+                return vec![];
+            }
+            // Contains single quote -> can't convert
+            if content.contains(&b'\'') {
+                return vec![];
+            }
+            // Contains backslash -> has escape sequences, don't convert
+            if content.contains(&b'\\') {
+                return vec![];
+            }
+            vec![Diagnostic {
+                rule: self.name(),
+                message: "Prefer single-quoted strings when interpolation is not needed.".into(),
+                range: TextRange::new(start as u32, end as u32),
+                severity: Severity::Warning,
+            }]
         }
-        // Contains backslash -> has escape sequences, don't convert
-        if content.contains(&b'\\') {
-            return vec![];
-        }
-
-        vec![Diagnostic {
-            rule: self.name(),
-            message: "Prefer single-quoted strings when interpolation is not needed.".into(),
-            range: TextRange::new(start as u32, end as u32),
-            severity: Severity::Warning,
-        }]
     }
 }

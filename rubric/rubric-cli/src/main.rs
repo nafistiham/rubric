@@ -183,6 +183,29 @@ fn build_rules_with_config(config: &Config) -> Vec<Box<dyn Rule + Send + Sync>> 
         }
     }
 
+    // Style/StringLiterals: honour `enforced_style` from rubric.toml.
+    if let Some(rule_cfg) = config.rules.get("Style/StringLiterals") {
+        let double_quotes = rule_cfg.enforced_style.as_deref() == Some("double_quotes");
+        for rule in &mut rules {
+            if rule.name() == "Style/StringLiterals" {
+                *rule = Box::new(StringLiterals { double_quotes });
+                break;
+            }
+        }
+    }
+
+    // Layout/SpaceAroundEqualsInParameterDefault: honour `enforced_style` from rubric.toml.
+    if let Some(rule_cfg) = config.rules.get("Layout/SpaceAroundEqualsInParameterDefault") {
+        if rule_cfg.enforced_style.as_deref() == Some("no_space") {
+            for rule in &mut rules {
+                if rule.name() == "Layout/SpaceAroundEqualsInParameterDefault" {
+                    *rule = Box::new(SpaceAroundEqualsInParameterDefault { no_space: true });
+                    break;
+                }
+            }
+        }
+    }
+
     rules
 }
 
@@ -221,7 +244,7 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         Box::new(SpaceBeforeBlockBraces),
         Box::new(MultilineOperationIndentation),
         Box::new(FrozenStringLiteralComment),
-        Box::new(StringLiterals),
+        Box::new(StringLiterals::default()),
         Box::new(TrailingCommaInArguments),
         Box::new(HashSyntax),
         Box::new(SymbolArray),
@@ -266,7 +289,7 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
         // New Layout cops
         Box::new(EndOfLine),
         Box::new(EmptyLinesAroundBlockBody),
-        Box::new(SpaceAroundEqualsInParameterDefault),
+        Box::new(SpaceAroundEqualsInParameterDefault::default()),
         Box::new(SpaceInLambdaLiteral),
         Box::new(SpaceInsideBlockBraces),
         Box::new(SpaceInsideRangeLiteral),

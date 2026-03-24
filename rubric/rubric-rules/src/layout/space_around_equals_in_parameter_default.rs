@@ -1,6 +1,16 @@
 use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
-pub struct SpaceAroundEqualsInParameterDefault;
+/// `no_space: false` (default) → require spaces around `=` (`def foo(x = 1)`).
+/// `no_space: true`  → require no spaces around `=` (`def foo(x=1)`).
+pub struct SpaceAroundEqualsInParameterDefault {
+    pub no_space: bool,
+}
+
+impl Default for SpaceAroundEqualsInParameterDefault {
+    fn default() -> Self {
+        Self { no_space: false }
+    }
+}
 
 impl Rule for SpaceAroundEqualsInParameterDefault {
     fn name(&self) -> &'static str {
@@ -56,12 +66,24 @@ impl Rule for SpaceAroundEqualsInParameterDefault {
                         let missing_space_before = prev != b' ' && prev != b'!' && prev != b'<' && prev != b'>';
                         let missing_space_after = next != b' ' && next != b'=' && next != b'>';
 
-                        if missing_space_before || missing_space_after {
+                        let violation = if self.no_space {
+                            // no_space style: flag when spaces ARE present
+                            !missing_space_before || !missing_space_after
+                        } else {
+                            // space style (default): flag when spaces are missing
+                            missing_space_before || missing_space_after
+                        };
+                        if violation {
                             let line_start = ctx.line_start_offsets[i] as usize;
                             let eq_abs = (line_start + pos) as u32;
+                            let msg = if self.no_space {
+                                "Surrounding space detected for operator `=` in parameter default."
+                            } else {
+                                "Surrounding space missing for operator `=` in parameter default."
+                            };
                             diags.push(Diagnostic {
                                 rule: self.name(),
-                                message: "Surrounding space missing for operator `=` in parameter default.".into(),
+                                message: msg.into(),
                                 range: TextRange::new(eq_abs, eq_abs + 1),
                                 severity: Severity::Warning,
                             });
