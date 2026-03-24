@@ -34,6 +34,13 @@ impl Rule for LambdaCall {
         "Style/LambdaCall"
     }
 
+    /// Disabled by default: without AST type information we cannot reliably
+    /// distinguish lambda objects from regular objects, making text-based
+    /// detection too noisy. Users who care can enable it explicitly.
+    fn default_enabled(&self) -> bool {
+        false
+    }
+
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 

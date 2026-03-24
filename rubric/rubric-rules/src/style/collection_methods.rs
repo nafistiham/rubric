@@ -80,6 +80,13 @@ impl Rule for CollectionMethods {
         "Style/CollectionMethods"
     }
 
+    /// Disabled by default in RuboCop — this cop enforces opinionated
+    /// aliases (collect → map, detect → find, etc.) that many teams
+    /// intentionally allow. Mirror RuboCop's default.
+    fn default_enabled(&self) -> bool {
+        false
+    }
+
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 
