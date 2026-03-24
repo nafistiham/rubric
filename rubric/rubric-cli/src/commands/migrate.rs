@@ -315,6 +315,16 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    // Warn about inherit_gem — gem-relative configs cannot be resolved
+    if mapping.contains_key("inherit_gem") {
+        eprintln!(
+            "WARNING: `inherit_gem` in {} is not supported by `rubric migrate`.\n\
+             Cops from gem-bundled configs (e.g. rubocop-shopify) will not be migrated.\n\
+             You may need to manually add those cop settings to rubric.toml.",
+            rubocop_path.display()
+        );
+    }
+
     // Load all Enabled settings from inherited files
     let rubocop_dir = rubocop_path.parent().unwrap_or(Path::new("."));
     let mut visited = HashSet::new();
@@ -327,6 +337,20 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
         } else {
             vec![]
         };
+        // Warn about URL-based inherit_from entries we cannot fetch
+        let url_paths: Vec<&str> = paths.iter()
+            .filter(|p| p.starts_with("http://") || p.starts_with("https://"))
+            .map(String::as_str)
+            .collect();
+        if !url_paths.is_empty() {
+            eprintln!(
+                "WARNING: `inherit_from` in {} contains remote URL(s) that cannot be fetched:\n  {}\n\
+                 Cops defined in those remote configs will not be migrated.\n\
+                 If the remote config sets EnforcedStyle (e.g. double_quotes), add it manually.",
+                rubocop_path.display(),
+                url_paths.join("\n  ")
+            );
+        }
         for p in paths {
             let sub_cops = load_enabled_from_yaml(Path::new(&p), rubocop_dir, &mut visited);
             for (k, v) in sub_cops {
