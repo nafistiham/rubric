@@ -494,8 +494,15 @@ fn is_excluded(file_path: &std::path::Path, root: &std::path::Path, patterns: &[
 }
 
 /// Match a relative path string against a simple glob pattern.
-/// Supports `*` as a wildcard (matches any sequence of characters including `/`).
+/// Supports `*` and `**` wildcards (both match any sequence of characters
+/// including path separators, since rubric's exclude patterns are relative).
 fn glob_match_exclude(path: &str, pattern: &str) -> bool {
+    // Normalise: `**/` means "any path prefix including empty" — since our `*`
+    // already matches across `/`, removing `**/` gives equivalent semantics.
+    // Also collapse any remaining `**` to `*`.
+    let normalised = pattern.replace("**/", "").replace("**", "*");
+    let pattern: &str = &normalised;
+
     if !pattern.contains('*') {
         return path == pattern || path.ends_with(&format!("/{pattern}"));
     }
@@ -517,6 +524,41 @@ fn glob_match_exclude(path: &str, pattern: &str) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glob_match_exclude;
+
+    #[test]
+    fn double_star_slash_matches_nested_files() {
+        assert!(glob_match_exclude("spec/faraday/connection_spec.rb", "spec/**/*.rb"));
+        assert!(glob_match_exclude("spec/unit/foo_spec.rb", "spec/**/*.rb"));
+        assert!(!glob_match_exclude("lib/foo.rb", "spec/**/*.rb"));
+    }
+
+    #[test]
+    fn double_star_slash_matches_direct_children_too() {
+        assert!(glob_match_exclude("examples/basic.rb", "examples/**/*"));
+        assert!(glob_match_exclude("examples/deep/nested/file.rb", "examples/**/*"));
+    }
+
+    #[test]
+    fn double_star_without_slash_matches() {
+        assert!(glob_match_exclude("spec/foo.rb", "spec/**"));
+        assert!(glob_match_exclude("spec/foo/bar.rb", "spec/**"));
+    }
+
+    #[test]
+    fn exact_path_match() {
+        assert!(glob_match_exclude("lib/pry/pry_class.rb", "lib/pry/pry_class.rb"));
+        assert!(!glob_match_exclude("lib/pry/other.rb", "lib/pry/pry_class.rb"));
+    }
+
+    #[test]
+    fn single_star_matches_across_separators() {
+        assert!(glob_match_exclude("spec/foo/bar.rb", "spec/*.rb"));
+    }
 }
 
 fn main() -> Result<()> {
