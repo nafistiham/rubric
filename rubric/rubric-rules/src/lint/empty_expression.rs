@@ -213,7 +213,9 @@ impl Rule for EmptyExpression {
                         let preceded_by_word = open_pos > 0
                             && (bytes[open_pos - 1].is_ascii_alphanumeric()
                                 || bytes[open_pos - 1] == b'_');
-                        if !preceded_by_word {
+                        // `->()` is a zero-argument lambda literal, not an empty expression
+                        let preceded_by_arrow = open_pos > 0 && bytes[open_pos - 1] == b'>';
+                        if !preceded_by_word && !preceded_by_arrow {
                             let line_start = ctx.line_start_offsets[i] as usize;
                             diags.push(Diagnostic {
                                 rule: self.name(),

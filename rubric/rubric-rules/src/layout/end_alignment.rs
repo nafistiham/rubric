@@ -114,9 +114,13 @@ fn extract_heredoc_terminator(line: &str) -> Option<String> {
             let quote = if j < len && matches!(bytes[j], b'\'' | b'"' | b'`') {
                 let q = bytes[j]; j += 1; Some(q)
             } else { None };
-            let _ = quote;
             let start = j;
-            while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') { j += 1; }
+            if let Some(q) = quote {
+                // Quoted heredoc: collect everything up to the closing quote
+                while j < len && bytes[j] != q { j += 1; }
+            } else {
+                while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') { j += 1; }
+            }
             if j > start {
                 return Some(line[start..j].to_string());
             }
@@ -268,7 +272,7 @@ fn contains_assign_kw(trimmed: &str, kw: &str) -> bool {
 /// This handles cases like `puts "cascade do |t|"` (inside string, skip) vs
 /// `.gsub(/regex/) do |match|` (outside string, detect).
 fn has_do_pattern_outside_string(trimmed: &str) -> bool {
-    for pattern in &[" do |", " do|"] {
+    for pattern in &[" do |", " do|", ")do |", ")do|", "]do |", "]do|", "}do |", "}do|"] {
         if let Some(pos) = trimmed.rfind(pattern) {
             let after = &trimmed[pos + pattern.len()..];
             let code_after = strip_inline_comment_for_one_liner(after);

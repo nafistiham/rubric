@@ -133,13 +133,20 @@ impl Rule for IndentationWidth {
                     None
                 };
                 marker.and_then(|rest| {
-                    // Strip optional quotes around the terminator
-                    let rest = rest.trim_start_matches(|c: char| c == '\'' || c == '"');
-                    let term: String = rest
-                        .chars()
-                        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                        .collect();
-                    if term.is_empty() { None } else { Some(term) }
+                    let rest = rest.trim_start();
+                    // Quoted heredoc: `<<-'end;'` or `<<~"TERM"` — collect until closing quote
+                    if let Some(q) = rest.chars().next().filter(|&c| c == '\'' || c == '"' || c == '`') {
+                        let inner = &rest[q.len_utf8()..];
+                        let term: String = inner.chars().take_while(|&c| c != q).collect();
+                        if term.is_empty() { None } else { Some(term) }
+                    } else {
+                        // Unquoted: collect alphanumeric/underscore only
+                        let term: String = rest
+                            .chars()
+                            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                            .collect();
+                        if term.is_empty() { None } else { Some(term) }
+                    }
                 })
             } else {
                 None
@@ -224,7 +231,10 @@ impl Rule for IndentationWidth {
                 let is_boolean_continuation = prev_code.ends_with("&&")
                     || prev_code.ends_with("||")
                     || prev_code.ends_with("||=")
-                    || prev_code.ends_with("&&=");
+                    || prev_code.ends_with("&&=")
+                    || prev_code.ends_with(" and")
+                    || prev_code.ends_with(" or")
+                    || prev_code.ends_with(" not");
                 // Skip when previous line ends with an arithmetic/string operator that
                 // signals a multi-line expression continuation (alignment to operand).
                 let is_operator_continuation = prev_code.ends_with(" +")
