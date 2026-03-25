@@ -83,6 +83,9 @@ impl Rule for IndentationWidth {
         // closing delimiter.
         let mut in_heredoc = false;
         let mut heredoc_terminator: String = String::new();
+        // Multiline regex tracking: when inside a regex that spans multiple lines,
+        // skip all lines until the closing `/` (optionally followed by flags).
+        let mut in_multiline_regex = false;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             if line.is_empty() {
@@ -99,6 +102,20 @@ impl Rule for IndentationWidth {
                     heredoc_terminator.clear();
                 }
                 // Either way, don't check indentation of heredoc content.
+                prev_nonempty_line = line;
+                continue;
+            }
+
+            // ── Multiline regex body detection ───────────────────────────
+            if in_multiline_regex {
+                // Closing line: trimmed starts with `/` (possibly followed by flags)
+                let tr = line.trim_start();
+                if tr.starts_with('/') {
+                    let after = tr[1..].trim_start_matches(|c: char| c.is_ascii_alphabetic());
+                    if after.is_empty() || after.starts_with(' ') || after.starts_with('#') || after.starts_with(';') {
+                        in_multiline_regex = false;
+                    }
+                }
                 prev_nonempty_line = line;
                 continue;
             }
@@ -336,6 +353,33 @@ impl Rule for IndentationWidth {
             if let Some(term) = new_heredoc_terminator {
                 in_heredoc = true;
                 heredoc_terminator = term;
+            }
+
+            // Detect multiline regex opener: previous line ends with `=` and this line
+            // starts with `/`, OR this line starts with `/` after assignment context and
+            // doesn't close the regex on this line.
+            // Pattern: `var =\n  /regex...\n  more regex/x`
+            {
+                let tr = line.trim_start();
+                let prev_code = strip_inline_comment(prev_nonempty_line.trim_end());
+                if tr.starts_with('/') && (prev_code.ends_with('=') || prev_code.ends_with('(') || prev_code.ends_with(',')) {
+                    // Count slashes in this line to see if regex is closed.
+                    // A naive check: if no second `/` (unescaped) after the first, multiline.
+                    let bytes = tr.as_bytes();
+                    let mut j = 1usize; // skip the opening `/`
+                    let mut closed = false;
+                    while j < bytes.len() {
+                        if bytes[j] == b'\\' { j += 2; continue; }
+                        if bytes[j] == b'/' {
+                            closed = true;
+                            break;
+                        }
+                        j += 1;
+                    }
+                    if !closed {
+                        in_multiline_regex = true;
+                    }
+                }
             }
 
             prev_nonempty_line = line;
