@@ -355,13 +355,15 @@ fn load_todo(todo_path: &Path) -> HashMap<String, (Option<bool>, Vec<String>)> {
         if matches!(cop_name, "AllCops" | "inherit_from" | "require" | "inherit_gem") {
             continue;
         }
+        // Apply legacy renames so old todo entries map to the current cop name
+        let canonical = canonical_cop_name(cop_name);
         let enabled_override = value.get("Enabled").and_then(|v| v.as_bool());
         let excludes: Vec<String> = value
             .get("Exclude")
             .and_then(|v| v.as_sequence())
             .map(|seq| seq.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
             .unwrap_or_default();
-        result.insert(cop_name.to_string(), (enabled_override, excludes));
+        result.insert(canonical.to_string(), (enabled_override, excludes));
     }
     result
 }
@@ -396,6 +398,58 @@ fn format_rule_block(
     block
 }
 
+/// RuboCop has renamed many cops over the years (Style→Layout, Lint→Layout).
+/// Projects with older `.rubocop.yml` / `.rubocop_todo.yml` files use the old
+/// names. This table maps legacy names → current names so migrate picks them up.
+static COP_RENAMES: &[(&str, &str)] = &[
+    // Style → Layout (batch rename ~2017)
+    ("Style/SpaceInsideHashLiteralBraces",    "Layout/SpaceInsideHashLiteralBraces"),
+    ("Style/SpaceInsideBlockBraces",          "Layout/SpaceInsideBlockBraces"),
+    ("Style/SpaceInsideParens",               "Layout/SpaceInsideParens"),
+    ("Style/SpaceInsideArrayLiteralBrackets", "Layout/SpaceInsideArrayLiteralBrackets"),
+    ("Style/SpaceInsideRangeLiteral",         "Layout/SpaceInsideRangeLiteral"),
+    ("Style/SpaceInsideStringInterpolation",  "Layout/SpaceInsideStringInterpolation"),
+    ("Style/SpaceBeforeBlockBraces",          "Layout/SpaceBeforeBlockBraces"),
+    ("Style/SpaceAroundBlockParameters",      "Layout/SpaceAroundBlockParameters"),
+    ("Style/SpaceAfterComma",                 "Layout/SpaceAfterComma"),
+    ("Style/SpaceAroundOperators",            "Layout/SpaceAroundOperators"),
+    ("Style/SpaceAroundKeyword",              "Layout/SpaceAroundKeyword"),
+    ("Style/TrailingWhitespace",              "Layout/TrailingWhitespace"),
+    ("Style/TrailingNewlines",                "Layout/TrailingEmptyLines"),
+    ("Style/IndentationWidth",                "Layout/IndentationWidth"),
+    ("Style/IndentationConsistency",          "Layout/IndentationConsistency"),
+    ("Style/EndAlignment",                    "Layout/EndAlignment"),
+    ("Style/DefEndAlignment",                 "Layout/DefEndAlignment"),
+    ("Style/ElseAlignment",                   "Layout/ElseAlignment"),
+    ("Style/CaseIndentation",                 "Layout/CaseIndentation"),
+    ("Style/MultilineOperationIndentation",   "Layout/MultilineOperationIndentation"),
+    ("Style/MultilineMethodCallIndentation",  "Layout/MultilineMethodCallIndentation"),
+    ("Style/FirstHashElementIndentation",     "Layout/FirstHashElementIndentation"),
+    ("Style/FirstArrayElementIndentation",    "Layout/FirstArrayElementIndentation"),
+    ("Style/EmptyLineBetweenDefs",            "Layout/EmptyLineBetweenDefs"),
+    ("Style/EmptyLines",                      "Layout/EmptyLines"),
+    ("Style/EmptyLinesAroundClassBody",       "Layout/EmptyLinesAroundClassBody"),
+    ("Style/EmptyLinesAroundModuleBody",      "Layout/EmptyLinesAroundModuleBody"),
+    ("Style/EmptyLinesAroundMethodBody",      "Layout/EmptyLinesAroundMethodBody"),
+    ("Style/LeadingCommentSpace",             "Layout/LeadingCommentSpace"),
+    ("Style/LineLength",                      "Layout/LineLength"),
+    ("Style/HashAlignment",                   "Layout/HashAlignment"),
+    ("Style/ExtraSpacing",                    "Layout/ExtraSpacing"),
+    // Lint → Layout
+    ("Lint/EndAlignment",                     "Layout/EndAlignment"),
+    ("Lint/DefEndAlignment",                  "Layout/DefEndAlignment"),
+];
+
+/// Return the canonical current cop name, following any rename in COP_RENAMES.
+fn canonical_cop_name(name: &str) -> &str {
+    for &(old, new) in COP_RENAMES {
+        if old == name {
+            return new;
+        }
+    }
+    name
+}
+
 pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
     let content = std::fs::read_to_string(rubocop_path)
         .with_context(|| format!("Could not read {}", rubocop_path.display()))?;
@@ -415,6 +469,18 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
         .and_then(|v| v.get("DisabledByDefault"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+
+    // Extract AllCops.Exclude — global file exclusions that apply to all cops.
+    let global_excludes: Vec<String> = mapping
+        .get("AllCops")
+        .and_then(|v| v.get("Exclude"))
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(|s| format!("\"{}\"", s)))
+                .collect()
+        })
+        .unwrap_or_default();
 
     // Track directives we cannot resolve — will force disabled_by_default = true
     // so that only explicitly-listed cops run (preventing noise from unresolved configs).
@@ -510,15 +576,18 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
     let mut emitted: HashSet<String> = HashSet::new();
 
     for (key, value) in mapping {
-        let cop_name = match key.as_str() {
+        let raw_cop_name = match key.as_str() {
             Some(s) => s,
             None => continue,
         };
 
         // Skip top-level Rubocop config keys (not cops)
-        if matches!(cop_name, "AllCops" | "inherit_from" | "require" | "inherit_gem" | "plugins") {
+        if matches!(raw_cop_name, "AllCops" | "inherit_from" | "require" | "inherit_gem" | "plugins") {
             continue;
         }
+
+        // Resolve legacy cop names (Style→Layout, Lint→Layout renames)
+        let cop_name = canonical_cop_name(raw_cop_name);
 
         if KNOWN_COPS.contains(&cop_name) {
             let enabled = value
@@ -603,6 +672,11 @@ pub fn run(rubocop_path: &Path, output_path: &Path) -> Result<()> {
         output.push_str("# disabled_by_default = true is set so only explicitly-listed cops run.\n");
     }
     output.push('\n');
+    // Emit global AllCops.Exclude as top-level exclude list
+    if !global_excludes.is_empty() {
+        let list = global_excludes.join(", ");
+        output.push_str(&format!("exclude = [{list}]\n\n"));
+    }
     if emit_disabled_by_default {
         output.push_str("[linter]\nenabled = true\ndisabled_by_default = true\n\n");
     } else {

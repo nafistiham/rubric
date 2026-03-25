@@ -131,6 +131,15 @@ impl Rule for MultilineMethodCallIndentation {
         "Layout/MultilineMethodCallIndentation"
     }
 
+    /// Disabled by default: the current implementation only detects trailing
+    /// dots (the line-continuation marker) but does not verify whether the
+    /// following line's indentation is correct. This produces false positives
+    /// on all well-formatted trailing-dot style chains. Re-enable only after
+    /// the indentation-check logic is implemented.
+    fn default_enabled(&self) -> bool {
+        false
+    }
+
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
 
