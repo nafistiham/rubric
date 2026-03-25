@@ -184,6 +184,25 @@ fn find_unclosed_percent_literal(line: &str) -> Option<(u8, u8)> {
     None
 }
 
+/// Returns true if this line opens a multiline /regex/ that doesn't close on the
+/// same line. Pattern: the code part ends with `/` after an assignment or opening-
+/// paren context, e.g. `CONST = /`, `foo(`, `bar,` etc.
+fn opens_unclosed_regex(line: &str) -> bool {
+    let code_part = strip_trailing_comment(line.trim_end());
+    if code_part.ends_with('/') {
+        let before = code_part[..code_part.len() - 1].trim_end();
+        return before.ends_with('=')
+            || before.ends_with("=~")
+            || before.ends_with("!~")
+            || before.ends_with('(')
+            || before.ends_with(',')
+            || before.ends_with('[')
+            || before.ends_with('{')
+            || before.is_empty();
+    }
+    false
+}
+
 /// Strip a trailing `# comment` from a trimmed line.
 /// Returns the line up to the comment `#`, trailing-whitespace-trimmed.
 /// String interpolation `#{` is NOT treated as a comment.
@@ -431,6 +450,8 @@ impl Rule for DefEndAlignment {
         // is_def=true = def/class/module (alignment checked), is_def=false = inner construct
         let mut stack: Vec<(usize, usize, bool)> = Vec::new();
         let mut in_heredoc: Option<String> = None;
+        // Track multi-line /regex/ — body lines must not be parsed for keywords.
+        let mut in_multiline_regex = false;
         // Track multi-line percent literals (`%r{...}`, `%w(...)`, etc.).
         // When set, body lines are skipped until the matching closer is found.
         let mut in_multiline_pct: Option<(u8, u8)> = None; // (opener, closer)
@@ -465,6 +486,20 @@ impl Rule for DefEndAlignment {
             if let Some(ref term) = in_heredoc.clone() {
                 if line.trim() == term.as_str() {
                     in_heredoc = None;
+                }
+                continue;
+            }
+
+            // Skip multiline /regex/ body lines — content inside is not Ruby syntax.
+            if in_multiline_regex {
+                let tr = line.trim_start();
+                if tr.starts_with('/') {
+                    let after = tr[1..].trim_start_matches(|c: char| c.is_ascii_alphabetic());
+                    if after.is_empty() || after.starts_with(' ') || after.starts_with('#')
+                        || after.starts_with(';') || after.starts_with('\n')
+                    {
+                        in_multiline_regex = false;
+                    }
                 }
                 continue;
             }
@@ -672,6 +707,11 @@ impl Rule for DefEndAlignment {
                     in_multiline_pct = Some((opener, closer));
                     multiline_pct_depth = 0;
                 }
+            }
+
+            // Detect multiline /regex/ opener — subsequent lines are regex body.
+            if !in_multiline_regex && opens_unclosed_regex(line) {
+                in_multiline_regex = true;
             }
         }
 
