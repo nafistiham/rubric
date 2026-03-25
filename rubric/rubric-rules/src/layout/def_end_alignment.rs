@@ -590,6 +590,8 @@ impl Rule for DefEndAlignment {
                 // `var = begin` / `var ||= begin` / `x || begin` inline begin/rescue/end block
                 || t.ends_with("= begin") || t.ends_with("|| begin") || t.ends_with("&& begin")
                 || t.contains("= begin ")
+                // `(begin` — begin expression inside parentheses: `(begin...rescue...end)`
+                || (t.contains("(begin") && { let p = t.find("(begin").unwrap(); let after = &t[p + 6..]; after.is_empty() || after.starts_with(' ') || after.starts_with('\n') })
                 // `var = while cond` / `var = until cond` inline loop expression
                 || t.contains("= while ") || t.ends_with("= while")
                 || t.contains("= until ") || t.ends_with("= until")
@@ -599,6 +601,29 @@ impl Rule for DefEndAlignment {
                 stack.push((i, indent, true));
             } else if (is_inner_construct || has_inline_conditional) && !stack.is_empty() {
                 stack.push((i, indent, false));
+                if is_inner_construct {
+                    let t_stripped = strip_trailing_comment(t);
+                    // `if (expr = (begin` / `unless (expr = (begin` — keyword opener with an
+                    // inline `(begin` block. The `(begin`'s `end` is extra, so push another frame.
+                    let has_paren_begin = if let Some(pos) = t_stripped.find("(begin") {
+                        let after = &t_stripped[pos + 6..];
+                        after.is_empty() || !after.chars().next().map_or(false, |c| c.is_ascii_alphanumeric() || c == '_')
+                    } else {
+                        false
+                    };
+                    // `if begin` / `unless begin` — bare `begin` as the condition.
+                    // Generates TWO `end`s: one closes `begin`, one closes `if/unless`. Push an
+                    // extra frame so both `end`s are properly consumed.
+                    // NOTE: `elsif begin` is NOT included — `elsif` does not add its own `end`,
+                    // so only ONE frame is needed for the `begin` condition, which is already
+                    // pushed above via `is_inner_construct`.
+                    let bare_begin_condition =
+                        t_stripped == "if begin" || t_stripped.starts_with("if begin ")
+                        || t_stripped == "unless begin" || t_stripped.starts_with("unless begin ");
+                    if has_paren_begin || bare_begin_condition {
+                        stack.push((i, indent, false));
+                    }
+                }
             }
 
             // Match `end` followed by end-of-string or any non-identifier character

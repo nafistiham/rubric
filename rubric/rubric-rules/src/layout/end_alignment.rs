@@ -195,11 +195,21 @@ fn has_inline_block_opener(trimmed: &str) -> bool {
             }
         }
     }
-    // `(if ...`, `(unless ...`, `(case ...` — parenthesised inline conditional
-    for kw in &["if ", "unless ", "case "] {
-        if trimmed.contains(&format!("({}", kw)) {
+    // `(if ...`, `(unless ...`, `(case ...`, `(begin` — parenthesised inline conditional/begin
+    for kw in &["if ", "unless ", "case ", "begin"] {
+        let needle = if kw.ends_with(' ') { format!("({}", kw) } else { format!("({})", kw.trim_end()) };
+        // For `(begin`, allow followed by space, newline, rescue, or nothing
+        if *kw == "begin" {
+            if let Some(pos) = trimmed.find("(begin") {
+                let after = &trimmed[pos + 6..];
+                if after.is_empty() || after.starts_with(' ') || after.starts_with('\n') {
+                    return true;
+                }
+            }
+        } else if trimmed.contains(&format!("({}", kw)) {
             return true;
         }
+        let _ = needle;
     }
     // `!! case expr`, `! case expr` — boolean coercion of a case expression.
     // `return case expr` — case expression returned from a method.
@@ -209,6 +219,25 @@ fn has_inline_block_opener(trimmed: &str) -> bool {
     }
     if trimmed.contains("return case ") || trimmed.ends_with("return case") {
         return true;
+    }
+    // `elsif begin` / `elsif (begin` / `elsif (expr = (begin` — begin as the elsif condition.
+    if trimmed.starts_with("elsif begin") || trimmed.starts_with("elsif (begin")
+        || (trimmed.starts_with("elsif (") && trimmed.contains("(begin"))
+    {
+        return true;
+    }
+    // Trailing-modifier `if begin` / `unless begin`:
+    // e.g., `next if begin ... rescue ... end`
+    // The `begin...end` block serves as the condition of the trailing `if`/`unless`.
+    for pattern in &[" if begin", " unless begin"] {
+        if let Some(pos) = trimmed.find(pattern) {
+            if pos > 0 {
+                let after = &trimmed[pos + pattern.len()..];
+                if after.is_empty() || after.starts_with(' ') || after.starts_with('#') {
+                    return true;
+                }
+            }
+        }
     }
 
     // Arithmetic and logical operators before if/unless/case:
@@ -320,19 +349,27 @@ fn has_do_pattern_outside_string(trimmed: &str) -> bool {
 }
 
 /// Returns the unclosed paren depth after scanning a line for multi-line percent literals
-/// (`%w(...)`, `%i(...)`, `%W(...)`, `%I(...)`). Returns 0 if no unclosed literal is found.
+/// (`%w(...)`, `%i(...)`, `%W(...)`, `%I(...)`, `%(...)`, `%q(...)`, `%Q(...)`).
+/// Returns 0 if no unclosed literal is found.
 fn opening_pct_literal_depth(line: &str) -> i32 {
     let bytes = line.as_bytes();
     let n = bytes.len();
     let mut i = 0;
-    while i + 2 < n {
-        if bytes[i] == b'%'
-            && matches!(bytes[i + 1], b'w' | b'W' | b'i' | b'I')
-            && bytes[i + 2] == b'('
-        {
-            // Count the net unmatched parens from this `(` onwards.
+    while i + 1 < n {
+        if bytes[i] == b'%' && (
+            // %w( %W( %i( %I( — word/symbol arrays
+            (i + 2 < n && matches!(bytes[i + 1], b'w' | b'W' | b'i' | b'I') && bytes[i + 2] == b'(')
+            // %( — general string literal (equivalent to double-quoted string)
+            || bytes[i + 1] == b'('
+            // %q( %Q( — quoted string literals
+            || (i + 2 < n && matches!(bytes[i + 1], b'q' | b'Q') && bytes[i + 2] == b'(')
+        ) {
+            // Find the position of the opening `(`
+            let paren_pos = if bytes[i + 1] == b'(' { i + 1 } else { i + 2 };
+            if paren_pos >= n { i += 1; continue; }
+            // Count the net unmatched parens from the `(` onwards.
             let mut depth = 0i32;
-            for &b in &bytes[i + 2..] {
+            for &b in &bytes[paren_pos..] {
                 match b {
                     b'(' => depth += 1,
                     b')' => {
@@ -383,6 +420,12 @@ impl Rule for EndAlignment {
         // Percent-regex literal tracking: when inside a multi-line `%r{...}`, skip lines
         // since `end` inside a regex is pattern content, not a Ruby `end` keyword.
         let mut pct_regex_depth: i32 = 0;
+
+        // Bracket-delimited percent literal tracking: `%w[...]`, `%i[...]`, `%w{...}`, etc.
+        // The opener/closer pair is tracked so nested brackets are handled correctly.
+        let mut pct_bracket_depth: i32 = 0;
+        let mut pct_bracket_opener: u8 = 0;
+        let mut pct_bracket_closer: u8 = 0;
 
         // Continuation line tracking: if the previous non-comment, non-blank line ends
         // with `\`, the current line is a continuation and should NOT be treated as a
@@ -444,6 +487,73 @@ impl Rule for EndAlignment {
                 }
                 if depth > 0 {
                     pct_regex_depth = depth;
+                }
+            }
+
+            // Skip bracket-delimited percent literal body lines (`%w[...]`, `%i[...]`, etc.).
+            if pct_bracket_depth > 0 {
+                for &b in line.as_bytes() {
+                    if b == pct_bracket_opener { pct_bracket_depth += 1; }
+                    else if b == pct_bracket_closer {
+                        pct_bracket_depth -= 1;
+                        if pct_bracket_depth == 0 { break; }
+                    }
+                }
+                if pct_bracket_depth > 0 {
+                    i += 1;
+                    continue;
+                }
+                // depth dropped to 0: fall through to process the closing line
+            }
+            // Detect bracket-delimited percent literals opening on this line.
+            // Handles `%w[...]`, `%W[...]`, `%i[...]`, `%I[...]`, `%w{...}`, `%i{...}`,
+            // `%w<...>`, and also bare `%[...]`, `%{...}` string literals.
+            if pct_bracket_depth == 0 {
+                let bytes = line.as_bytes();
+                let n_bytes = bytes.len();
+                let mut j = 0;
+                while j + 1 < n_bytes {
+                    if bytes[j] == b'%' {
+                        let (type_char, bracket_pos) = if j + 2 < n_bytes
+                            && matches!(bytes[j + 1], b'w' | b'W' | b'i' | b'I' | b'q' | b'Q' | b'x' | b's')
+                        {
+                            (bytes[j + 1], j + 2)
+                        } else {
+                            (0u8, j + 1)
+                        };
+                        let bp = bracket_pos;
+                        if bp < n_bytes {
+                            let (opener, closer) = match bytes[bp] {
+                                b'[' => (b'[', b']'),
+                                b'{' => (b'{', b'}'),
+                                b'<' => (b'<', b'>'),
+                                _ => (0, 0),
+                            };
+                            let _ = type_char;
+                            if opener != 0 {
+                                let mut depth = 0i32;
+                                let mut closed = false;
+                                let mut k = bp;
+                                while k < n_bytes {
+                                    if bytes[k] == opener { depth += 1; }
+                                    else if bytes[k] == closer {
+                                        depth -= 1;
+                                        if depth == 0 { closed = true; break; }
+                                    }
+                                    k += 1;
+                                }
+                                if !closed && depth > 0 {
+                                    pct_bracket_depth = depth;
+                                    pct_bracket_opener = opener;
+                                    pct_bracket_closer = closer;
+                                    break;
+                                }
+                                j = if closed { k + 1 } else { k };
+                                continue;
+                            }
+                        }
+                    }
+                    j += 1;
                 }
             }
 
@@ -617,6 +727,26 @@ impl Rule for EndAlignment {
 
             if is_keyword_opener {
                 stack.push((indent, true));
+                // `if begin` / `unless begin` / `if (expr = (begin` — `begin` serves as the
+                // condition expression; its matching `end` is "inline" and should not
+                // be alignment-checked independently.
+                let cond_str = strip_inline_comment_for_one_liner(trimmed);
+                let is_begin_condition = cond_str == "if begin"
+                    || cond_str.starts_with("if begin ")
+                    || cond_str == "unless begin"
+                    || cond_str.starts_with("unless begin ")
+                    // `if (expr = (begin` etc. — begin inside parentheses as the condition
+                    || {
+                        if let Some(pos) = cond_str.find("(begin") {
+                            let after = &cond_str[pos + 6..];
+                            after.is_empty() || !after.chars().next().map_or(false, |c| c.is_ascii_alphanumeric() || c == '_')
+                        } else {
+                            false
+                        }
+                    };
+                if is_begin_condition {
+                    stack.push((indent, false)); // inline begin frame — end is not alignment-checked
+                }
             } else if is_do_block {
                 // Push with check=false: we track the frame for correct end-consumption,
                 // but do NOT flag misaligned ends.
