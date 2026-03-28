@@ -574,6 +574,11 @@ fn main() -> Result<()> {
             let config = Config::load(&config_dir)
                 .or_else(|_| Config::load(&std::env::current_dir()?))?;
 
+            if !config.linter.enabled {
+                println!("Linter disabled by config.");
+                return Ok(());
+            }
+
             let rules = build_rules_with_config(&config);
 
             let files: Vec<_> = runner::collect_ruby_files(&path)
@@ -640,17 +645,44 @@ fn main() -> Result<()> {
         }
 
         Commands::Fmt { path } => {
-            let config = Config::load(&std::env::current_dir()?)?;
+            let config_dir = if path.is_dir() {
+                path.clone()
+            } else {
+                path.parent().unwrap_or(&path).to_path_buf()
+            };
+            let config = Config::load(&config_dir)
+                .or_else(|_| Config::load(&std::env::current_dir()?))?;
+
+            if !config.formatter.enabled {
+                println!("Formatter disabled by config.");
+                return Ok(());
+            }
 
             let rules = build_rules_with_config(&config);
 
-            let files = runner::collect_ruby_files(&path);
+            let files: Vec<_> = runner::collect_ruby_files(&path)
+                .into_iter()
+                .filter(|f| !is_excluded(f, &config_dir, &config.exclude))
+                .collect();
             if files.is_empty() {
                 println!("No Ruby files found.");
                 return Ok(());
             }
 
             let mut results = runner::run_all_files(&files, &rules);
+            // Filter out diagnostics for files excluded by per-rule config.
+            for (file, _source, diagnostics) in &mut results {
+                diagnostics.retain(|d| {
+                    if let Some(rule_cfg) = config.rules.get(d.rule) {
+                        if !rule_cfg.exclude.is_empty()
+                            && is_excluded(file, &config_dir, &rule_cfg.exclude)
+                        {
+                            return false;
+                        }
+                    }
+                    true
+                });
+            }
             results.sort_by(|a, b| a.0.cmp(&b.0));
 
             let total_fixed = apply_safe_fixes(&results, &rules)?;

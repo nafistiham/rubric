@@ -127,12 +127,13 @@ impl Config {
         let raw: RawConfig = toml::from_str(&content)
             .with_context(|| format!("parsing {}", path.display()))?;
 
-        // Merge exclude: top-level takes precedence; fall back to formatter.exclude.
-        let exclude = if !raw.exclude.is_empty() {
-            raw.exclude
-        } else {
-            raw.formatter.exclude
-        };
+        // Merge both exclude lists; deduplicate while preserving order.
+        let mut exclude = raw.exclude;
+        for pat in raw.formatter.exclude {
+            if !exclude.contains(&pat) {
+                exclude.push(pat);
+            }
+        }
 
         let rules = raw.rules.into_iter()
             .map(|(k, v)| (k, RuleConfig { enabled: v.enabled, exclude: v.exclude, max: v.max, enforced_style: v.enforced_style }))
