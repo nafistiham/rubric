@@ -571,8 +571,7 @@ fn main() -> Result<()> {
             } else {
                 path.parent().unwrap_or(&path).to_path_buf()
             };
-            let config = Config::load(&config_dir)
-                .or_else(|_| Config::load(&std::env::current_dir()?))?;
+            let config = Config::find_and_load(&config_dir)?;
 
             if !config.linter.enabled {
                 println!("Linter disabled by config.");
@@ -650,8 +649,7 @@ fn main() -> Result<()> {
             } else {
                 path.parent().unwrap_or(&path).to_path_buf()
             };
-            let config = Config::load(&config_dir)
-                .or_else(|_| Config::load(&std::env::current_dir()?))?;
+            let config = Config::find_and_load(&config_dir)?;
 
             if !config.formatter.enabled {
                 println!("Formatter disabled by config.");

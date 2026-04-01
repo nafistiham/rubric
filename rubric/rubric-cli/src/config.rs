@@ -113,6 +113,22 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Walk upward from `start_dir` until a `rubric.toml` is found, then load it.
+    /// Returns default config if no file is found in any ancestor directory.
+    pub fn find_and_load(start_dir: &Path) -> Result<Self> {
+        let mut dir = start_dir.to_path_buf();
+        loop {
+            let candidate = dir.join("rubric.toml");
+            if candidate.exists() {
+                return Self::load(&dir);
+            }
+            match dir.parent() {
+                Some(parent) => dir = parent.to_path_buf(),
+                None => return Ok(Self::default()),
+            }
+        }
+    }
+
     /// Load `rubric.toml` from `dir`. Returns default config if the file doesn't exist.
     pub fn load(dir: &Path) -> Result<Self> {
         let path = dir.join("rubric.toml");
