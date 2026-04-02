@@ -87,9 +87,12 @@ fn fmt_respects_per_rule_excludes() {
     let dir = TempDir::new().unwrap();
     let original = "x = 1   \n";
     let file = write_rb(&dir, "generated.rb", original);
+    // Use disabled_by_default so only TrailingWhitespace runs, then exclude generated.rb
+    // from it. That way no other fixable cop can touch the file.
     write_toml(
         &dir,
-        "[rules.\"Layout/TrailingWhitespace\"]\nexclude = [\"generated.rb\"]\n",
+        "[linter]\ndisabled_by_default = true\n\n\
+         [rules.\"Layout/TrailingWhitespace\"]\nenabled = true\nexclude = [\"generated.rb\"]\n",
     );
 
     Command::new(rubric_bin())

@@ -36,7 +36,7 @@ struct RawConfig {
     rules: HashMap<String, RawRuleConfig>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
 struct RawLinterConfig {
     #[serde(default = "default_true")]
     enabled: bool,
@@ -44,13 +44,25 @@ struct RawLinterConfig {
     disabled_by_default: bool,
 }
 
-#[derive(Debug, Deserialize, Default)]
+impl Default for RawLinterConfig {
+    fn default() -> Self {
+        Self { enabled: true, disabled_by_default: false }
+    }
+}
+
+#[derive(Debug, Deserialize)]
 struct RawFormatterConfig {
     #[serde(default = "default_true")]
     enabled: bool,
     /// `exclude` may be nested under `[formatter]` in the TOML file.
     #[serde(default)]
     exclude: Vec<String>,
+}
+
+impl Default for RawFormatterConfig {
+    fn default() -> Self {
+        Self { enabled: true, exclude: Vec::new() }
+    }
 }
 
 fn default_true() -> bool {
