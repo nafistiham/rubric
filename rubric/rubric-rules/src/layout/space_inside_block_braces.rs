@@ -239,7 +239,7 @@ impl Rule for SpaceInsideBlockBraces {
                     let is_hash = preceded_by_in_keyword
                         || matches!(
                             prev_nonspace,
-                            b'=' | b',' | b'(' | b'[' | b'{' | b':' | 0
+                            b'=' | b',' | b'(' | b'[' | b'{' | b':' | b'>' | b'<' | b'?' | b'|' | b';' | b'~' | 0
                         )
                         || pos == line.len() - line.trim_start().len();
 
