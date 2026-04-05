@@ -77,9 +77,30 @@ impl Rule for NumericLiterals {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        // Cross-line percent literal state: Some((closer_byte, nesting_depth))
+        let mut in_multiline_pct: Option<(u8, i32)> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             let trimmed = line.trim_start();
+
+            // If we're inside a multiline percent literal, skip the line entirely
+            // (update nesting depth to know when it closes, then move on)
+            if let Some((close, ref mut depth)) = in_multiline_pct {
+                let bytes = line.as_bytes();
+                let open = match close { b')' => b'(', b']' => b'[', b'}' => b'{', b'>' => b'<', _ => 0 };
+                let mut j = 0;
+                while j < bytes.len() {
+                    let c = bytes[j];
+                    if c == b'\\' { j += 2; continue; }
+                    if open != 0 && c == open { *depth += 1; }
+                    else if c == close {
+                        if *depth > 0 { *depth -= 1; }
+                        else { in_multiline_pct = None; break; }
+                    }
+                    j += 1;
+                }
+                continue;
+            }
 
             // Skip full comment lines
             if trimmed.starts_with('#') {
@@ -222,6 +243,12 @@ impl Rule for NumericLiterals {
                 }
 
                 pos += 1;
+            }
+
+            // If a percent literal started on this line but didn't close, carry
+            // its state forward so subsequent lines are skipped entirely.
+            if in_pct.is_some() {
+                in_multiline_pct = in_pct;
             }
         }
 
