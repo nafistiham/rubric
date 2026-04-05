@@ -18,24 +18,20 @@ impl Rule for Alias {
                 continue;
             }
 
-            // Must start with `alias ` but NOT `alias_method`
-            if !trimmed.starts_with("alias ") {
-                continue;
-            }
-
-            // Make sure it's not `alias_method`
-            if trimmed.starts_with("alias_method") {
+            // RuboCop's default EnforcedStyle is `prefer_alias`:
+            // flag `alias_method` and recommend using `alias` keyword.
+            if !trimmed.starts_with("alias_method") {
                 continue;
             }
 
             let line_start = ctx.line_start_offsets[i] as usize;
             let indent = line.len() - trimmed.len();
             let start = (line_start + indent) as u32;
-            let end = start + 5; // `alias`
+            let end = start + 12; // `alias_method`
 
             diags.push(Diagnostic {
                 rule: self.name(),
-                message: "Use `alias_method` instead of `alias`.".into(),
+                message: "Use `alias` instead of `alias_method`.".into(),
                 range: TextRange::new(start, end),
                 severity: Severity::Warning,
             });

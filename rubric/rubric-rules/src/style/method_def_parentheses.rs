@@ -59,6 +59,13 @@ impl Rule for MethodDefParentheses {
 
             let rest_after_name = &after_def[name_end..];
 
+            // Skip endless method definitions: `def foo = expr` (Ruby 3.0+).
+            // The `=` here is the body assignment, not a parameter list.
+            let trimmed_rn = rest_after_name.trim_start();
+            if trimmed_rn.starts_with('=') && !trimmed_rn.starts_with("==") {
+                continue;
+            }
+
             let line_start = ctx.line_start_offsets[i] as usize;
             // Offset of `def` in the line
             let def_col = line.len() - trimmed.len();
