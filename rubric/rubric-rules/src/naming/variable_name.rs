@@ -90,7 +90,9 @@ impl Rule for VariableName {
                     }
 
                     // Check for `=` that is not part of `==`, `!=`, `<=`, `>=`, `=>`, `+=`, `-=`, etc.
-                    if k < n && bytes[k] == b'=' {
+                    // Require at least one space before `=` to distinguish Ruby local-variable
+                    // assignments (`myVar = x`) from HTML/XML attribute syntax (`viewBox="0 0 ..."`).
+                    if k > j && k < n && bytes[k] == b'=' {
                         // Must not be followed by `=` or `>`
                         let next = if k + 1 < n { bytes[k + 1] } else { 0 };
                         if next != b'=' && next != b'>' {
