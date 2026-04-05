@@ -48,12 +48,13 @@ impl Rule for FormatParameterMismatch {
                     if let Some(fmt) = fmt_str {
                         // Count format specifiers
                         let specifier_count = count_format_specifiers(fmt);
-                        // Count remaining arguments (after the format string)
+                        // Count remaining arguments (after the format string).
+                        // Must track parentheses/brackets to skip commas inside nested calls.
                         let remaining = args_inner.trim_start_matches(|c: char| c != ',');
                         let arg_count = if remaining.is_empty() || !remaining.starts_with(',') {
                             0
                         } else {
-                            remaining[1..].split(',').count()
+                            count_top_level_args(&remaining[1..])
                         };
 
                         if specifier_count != arg_count {
@@ -77,6 +78,35 @@ impl Rule for FormatParameterMismatch {
 
         diags
     }
+}
+
+/// Count top-level comma-separated arguments in `s`, respecting nested parens/brackets/braces.
+fn count_top_level_args(s: &str) -> usize {
+    if s.trim().is_empty() {
+        return 0;
+    }
+    let bytes = s.as_bytes();
+    let mut depth: i32 = 0;
+    let mut count = 1usize;
+    let mut in_string: Option<u8> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(d) = in_string {
+            if b == b'\\' { i += 2; continue; }
+            if b == d { in_string = None; }
+        } else {
+            match b {
+                b'"' | b'\'' => { in_string = Some(b); }
+                b'(' | b'[' | b'{' => { depth += 1; }
+                b')' | b']' | b'}' => { if depth > 0 { depth -= 1; } }
+                b',' if depth == 0 => { count += 1; }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    count
 }
 
 fn extract_first_string(s: &str) -> Option<&str> {
