@@ -88,6 +88,33 @@ fn count_closers(trimmed: &str) -> usize {
     count
 }
 
+/// Scan backwards from `def_line` to find the immediately enclosing class
+/// declaration. Returns true if that class has an explicit parent (`< Parent`).
+/// Classes without `<` inherit from Object implicitly — rubocop does not flag
+/// missing super for those.
+fn enclosing_class_has_parent(lines: &[&str], def_line: usize) -> bool {
+    let mut depth = 0i32; // positive = inside nested blocks we need to skip
+    let mut j = def_line as i64 - 1;
+    while j >= 0 {
+        let line = lines[j as usize].trim();
+        if line.starts_with('#') { j -= 1; continue; }
+        let closes = count_closers(line) as i32;
+        let opens_n = count_openers(line) as i32;
+        depth += closes;
+        // For each opener on this line, check if depth reaches 0
+        for _ in 0..opens_n {
+            if depth <= 0 {
+                // This is the opener of the immediately enclosing block
+                // Check if it's a class with explicit parent
+                return line.contains(" < ") && (line.starts_with("class ") || line.contains(" class "));
+            }
+            depth -= 1;
+        }
+        j -= 1;
+    }
+    false
+}
+
 impl Rule for MissingSuper {
     fn name(&self) -> &'static str {
         "Lint/MissingSuper"
@@ -95,7 +122,7 @@ impl Rule for MissingSuper {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        let lines = &ctx.lines;
+        let lines: Vec<&str> = ctx.lines.iter().map(|s| s.as_ref()).collect();
         let n = lines.len();
         let mut i = 0;
 
@@ -109,6 +136,14 @@ impl Rule for MissingSuper {
                 || trimmed.starts_with("def initialize\t");
 
             if !is_init || trimmed.starts_with('#') {
+                i += 1;
+                continue;
+            }
+
+            // Only flag if inside a class with explicit parent (`class Foo < Bar`).
+            // Classes without explicit parents inherit from Object — rubocop
+            // does not require super in their initialize methods.
+            if !enclosing_class_has_parent(&lines, i) {
                 i += 1;
                 continue;
             }
@@ -138,8 +173,8 @@ impl Rule for MissingSuper {
 
             while j < n && depth > 0 {
                 let body_line = lines[j].trim();
-                // Check for super in this line
-                if depth == 1 && line_has_super(&lines[j]) {
+                // Check for super at any nesting level inside initialize
+                if line_has_super(lines[j]) {
                     found_super = true;
                 }
                 // Update depth
