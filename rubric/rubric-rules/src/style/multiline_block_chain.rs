@@ -26,6 +26,53 @@ impl Rule for MultilineBlockChain {
                 continue;
             }
 
+            // For `}.` chains, verify the matching `{` opened a block, not a hash literal.
+            // Heuristic: scan backward to find the matching `{`. If that `{` is the
+            // first non-space character on its line (i.e., `{` starts the line as a
+            // hash literal), skip it.
+            if is_brace_chain {
+                let indent_width = line.len() - trimmed.len();
+                let mut depth: isize = 1;
+                let mut is_brace_block = false;
+                let mut j = i;
+                // Start scanning backward from this line (the `}` may be on this line too)
+                'outer: loop {
+                    if j == 0 { break; }
+                    j -= 1;
+                    let prev_line = &ctx.lines[j];
+                    let prev_bytes = prev_line.as_bytes();
+                    // Scan from right to left looking for `{` and `}` (simple, ignoring strings)
+                    let mut k = prev_bytes.len();
+                    while k > 0 {
+                        k -= 1;
+                        let c = prev_bytes[k];
+                        if c == b'}' {
+                            depth += 1;
+                        } else if c == b'{' {
+                            depth -= 1;
+                            if depth == 0 {
+                                // Found the matching `{`. Check indentation of its line.
+                                let open_indent = prev_line.len() - prev_line.trim_start().len();
+                                // If `{` is the first non-space char on its line, it's a
+                                // hash literal (standalone `{` or `{ key: val }`).
+                                let first_nonspace = k == open_indent;
+                                // If the opening `{` line is at same indent as our `}.` line,
+                                // AND the `{` is the first non-space char, it's a hash literal.
+                                if first_nonspace && open_indent == indent_width {
+                                    is_brace_block = false;
+                                } else {
+                                    is_brace_block = true;
+                                }
+                                break 'outer;
+                            }
+                        }
+                    }
+                }
+                if !is_brace_block {
+                    continue;
+                }
+            }
+
             // For `end.` chains, verify the matching `end` closes a `do...end` block,
             // not a control-flow expression (if/unless/case/begin/while/until/for).
             // Heuristic: scan backward, tracking `end` depth, and check what keyword
