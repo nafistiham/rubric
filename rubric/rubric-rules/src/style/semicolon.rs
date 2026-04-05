@@ -108,15 +108,23 @@ fn first_semicolon_outside_string_comment(line: &str) -> Option<usize> {
                 }
                 i += 1;
             }
-            // /regex/ — only if preceded by `[`, `(`, `,`, `=`, `!`, `|`, `&` or start of line
+            // /regex/ — only if preceded by an operator, delimiter, or method name
             b'/' => {
-                let prev = bytes[..i].iter().rposition(|&b| b != b' ' && b != b'\t')
-                    .map(|p| bytes[p]);
-                let is_regex_ctx = matches!(prev, None
-                    | Some(b'[') | Some(b'(') | Some(b',') | Some(b'=')
-                    | Some(b'!') | Some(b'|') | Some(b'&') | Some(b'?') | Some(b':'));
-                if is_regex_ctx {
-                    in_delimited = Some(b'/');
+                // `/=` is divide-assign, not a regex — skip the `=` too
+                if bytes.get(i + 1).copied() == Some(b'=') {
+                    i += 1; // skip `=`; outer `i += 1` handles `/`
+                } else {
+                    let prev = bytes[..i].iter().rposition(|&b| b != b' ' && b != b'\t')
+                        .map(|p| bytes[p]);
+                    let is_regex_ctx = matches!(prev, None
+                        | Some(b'[') | Some(b'(') | Some(b',') | Some(b'=')
+                        | Some(b'!') | Some(b'|') | Some(b'&') | Some(b'?') | Some(b':'))
+                        // Also treat `/` after a method name (alphabetic/`_`) as regex context.
+                        // e.g. `match /regex/`, `gsub /pattern/`, `scan /re/`
+                        || prev.map_or(false, |c| c.is_ascii_alphabetic() || c == b'_');
+                    if is_regex_ctx {
+                        in_delimited = Some(b'/');
+                    }
                 }
             }
             b'#' => return None, // comment
