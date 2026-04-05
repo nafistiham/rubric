@@ -63,8 +63,14 @@ fn extract_constant_assignment<'a>(scan_slice: &'a str) -> Option<(&'a str, usiz
         return None;
     }
 
-    // After the name, expect optional whitespace then `=` then NOT `=`
-    let after_name = trimmed[name_end..].trim_start();
+    // After the name, require at least one space then `=` then NOT `=`.
+    // Requiring a space avoids matching shell/env-file syntax like `KEY="value"`
+    // that may appear inside multi-line Ruby string literals (e.g. %(KEY="val")).
+    let rest_after_name = &trimmed[name_end..];
+    if !rest_after_name.starts_with(' ') && !rest_after_name.starts_with('\t') {
+        return None;
+    }
+    let after_name = rest_after_name.trim_start();
     if !after_name.starts_with('=') {
         return None;
     }
