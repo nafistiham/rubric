@@ -92,11 +92,46 @@ impl Rule for NumericLiterals {
             let line_start = ctx.line_start_offsets[i] as usize;
 
             let mut pos = 0;
+            let mut in_string: Option<u8> = None; // inside "..." or '...'
+            let mut in_regex = false;              // inside /regex/
             while pos < scan_bytes.len() {
                 let b = scan_bytes[pos];
 
+                // Track string/regex context
+                if let Some(delim) = in_string {
+                    if b == b'\\' { pos += 2; continue; }
+                    if b == delim { in_string = None; }
+                    pos += 1;
+                    continue;
+                }
+                if in_regex {
+                    if b == b'\\' { pos += 2; continue; }
+                    if b == b'/' { in_regex = false; }
+                    pos += 1;
+                    continue;
+                }
+
+                // Detect string/regex openers
+                match b {
+                    b'"' | b'\'' => { in_string = Some(b); pos += 1; continue; }
+                    b'/' => {
+                        // Regex if preceded by =, (, ,, [, space/start, !, |, &, ?, :
+                        let prev_nonws = scan_bytes[..pos].iter().rposition(|&c| c != b' ' && c != b'\t')
+                            .map(|p| scan_bytes[p]);
+                        if matches!(prev_nonws, None
+                            | Some(b'=') | Some(b'(') | Some(b',') | Some(b'[')
+                            | Some(b'!') | Some(b'|') | Some(b'&') | Some(b'?')
+                            | Some(b':') | Some(b';') | Some(b'{')) {
+                            in_regex = true;
+                            pos += 1;
+                            continue;
+                        }
+                    }
+                    _ => {}
+                }
+
                 if b.is_ascii_digit() {
-                    // Collect the full numeric token (digits + underscores)
+                    // Collect the full numeric token (digits + underscores + dot)
                     let token_start = pos;
                     while pos < scan_bytes.len()
                         && (scan_bytes[pos].is_ascii_digit()
@@ -122,13 +157,8 @@ impl Rule for NumericLiterals {
                         continue;
                     }
 
-                    // Skip if this position is inside a string
-                    if in_string_at(scan_bytes, token_start) {
-                        continue;
-                    }
-
                     // Skip numbers that are part of an identifier, symbol name, or
-                    // method name (e.g. `:index_20180106`, `func_name123`, `0abc`).
+                    // method name (e.g. `:index_20180106`, `func_name123`).
                     if token_start > 0 {
                         let prev = scan_bytes[token_start - 1];
                         if prev.is_ascii_alphanumeric() || prev == b'_' {
