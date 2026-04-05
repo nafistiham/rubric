@@ -61,9 +61,56 @@ fn has_single_bitwise_operator(condition: &str) -> bool {
     let mut i = 0;
     let mut brace_depth: i32 = 0;
     let mut in_block_params = false; // true between the opening and closing `|` of block params
+    let mut in_string: Option<u8> = None; // Some(b'"') or Some(b'\'') when inside a string
+    let mut in_regex = false; // inside /regex/ — `|` and `&` are literal
 
     while i < len {
         let b = bytes[i];
+
+        // Skip escaped characters inside strings/regex
+        if b == b'\\' && (in_string.is_some() || in_regex) {
+            i += 2;
+            continue;
+        }
+
+        // Track string context
+        if let Some(delim) = in_string {
+            if b == delim {
+                in_string = None;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Track regex context
+        if in_regex {
+            if b == b'/' {
+                in_regex = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Detect string start
+        if b == b'"' || b == b'\'' {
+            in_string = Some(b);
+            i += 1;
+            continue;
+        }
+
+        // Detect regex start: `/` preceded by `=`, `(`, `,`, `[`, `!`, `|`, `&`, `?`, `:`, `;`
+        if b == b'/' {
+            let prev_nonws = bytes[..i].iter().rposition(|&c| c != b' ' && c != b'\t')
+                .map(|p| bytes[p]);
+            if matches!(prev_nonws, None
+                | Some(b'=') | Some(b'(') | Some(b',') | Some(b'[')
+                | Some(b'!') | Some(b'|') | Some(b'&') | Some(b'?')
+                | Some(b':') | Some(b';') | Some(b'{') | Some(b'>')) {
+                in_regex = true;
+                i += 1;
+                continue;
+            }
+        }
 
         match b {
             b'{' => { brace_depth += 1; in_block_params = false; }
@@ -88,8 +135,13 @@ fn has_single_bitwise_operator(condition: &str) -> bool {
             let next_is_amp = i + 1 < len && bytes[i + 1] == b'&';
             let next_is_dot = i + 1 < len && bytes[i + 1] == b'.';
             let next_is_eq = i + 1 < len && bytes[i + 1] == b'=';
+            // `&:symbol` or `&method` block-pass operator — not bitwise
+            let next_is_colon = i + 1 < len && bytes[i + 1] == b':';
+            // `(&` at start of a method call arg: prev char is `(` or `,`
+            let prev_is_arg_sep = i > 0 && matches!(bytes[i - 1], b'(' | b',');
 
-            if !prev_is_amp && !next_is_amp && !next_is_dot && !next_is_eq {
+            if !prev_is_amp && !next_is_amp && !next_is_dot && !next_is_eq
+                && !next_is_colon && !prev_is_arg_sep {
                 return true;
             }
         } else if b == b'|' && brace_depth == 0 && !in_block_params {
