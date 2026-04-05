@@ -186,6 +186,15 @@ impl Rule for RedundantInterpolation {
                     }
                     b'"' => {
                         if let Some(end) = is_pure_interpolation(bytes, i) {
+                            // Skip symbol contexts — rubocop does not flag:
+                            //   :"#{expr}"   (symbol literal with interpolation)
+                            //   "#{expr}":   (dynamic symbol hash key shorthand)
+                            let preceded_by_colon = i > 0 && bytes[i - 1] == b':';
+                            let followed_by_colon = end < n && bytes[end] == b':';
+                            if preceded_by_colon || followed_by_colon {
+                                // Skip this string as non-flaggable symbol context
+                                i = end;
+                            } else {
                             let start_offset = (line_start + i) as u32;
                             let end_offset = (line_start + end) as u32;
                             diags.push(Diagnostic {
@@ -195,6 +204,7 @@ impl Rule for RedundantInterpolation {
                                 severity: Severity::Warning,
                             });
                             i = end;
+                            }
                         } else {
                             // Skip past this double-quoted string without flagging
                             i += 1;
