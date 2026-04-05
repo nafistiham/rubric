@@ -34,6 +34,14 @@ impl Rule for OptionalArguments {
 
             for param in &params {
                 let p = param.trim();
+                // Keyword argument: `name: value` or `name:` — word chars followed by `:`
+                // Keyword arguments are not positional, so they don't violate this rule.
+                let is_keyword_arg = p.find(':').map(|colon_pos| {
+                    colon_pos > 0 && p[..colon_pos].chars().all(|c| c.is_alphanumeric() || c == '_')
+                }).unwrap_or(false);
+                if is_keyword_arg {
+                    continue;
+                }
                 if p.contains('=') {
                     seen_optional = true;
                 } else if seen_optional && !p.is_empty() && !p.starts_with('*') && !p.starts_with('&') {
