@@ -95,6 +95,20 @@ impl Rule for NumericPredicate {
                         continue;
                     }
 
+                    // Skip if LHS is a subexpression (preceded by a binary operator).
+                    // E.g. `packed_byte & 0x80 != 0` — extracted LHS is `0x80` but it's
+                    // the RHS of `&`, not the true LHS of `!=`.
+                    let before_lhs_char = before[..lhs_start].trim_end().as_bytes().last().copied();
+                    if matches!(
+                        before_lhs_char,
+                        Some(b'&') | Some(b'|') | Some(b'+') | Some(b'-')
+                            | Some(b'*') | Some(b'/') | Some(b'^') | Some(b'%')
+                            | Some(b'<') | Some(b'>') | Some(b'=') | Some(b'!')
+                    ) {
+                        search_from = abs_pos + pattern.len();
+                        continue;
+                    }
+
                     let flag_start = (line_start + abs_pos) as u32;
                     let flag_end = (line_start + abs_pos + pattern.len()) as u32;
 
