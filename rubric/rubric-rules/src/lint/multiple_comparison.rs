@@ -285,6 +285,10 @@ impl Rule for MultipleComparison {
         let mut seen_lines: HashSet<usize> = HashSet::new();
         // When `Some(word)`, we are inside a heredoc whose terminator is `word`.
         let mut heredoc_term: Option<String> = None;
+        // When true, we are inside a multiline regex (CONST = / ... /flags).
+        // Lines inside a multiline regex look like Ruby code but are regex patterns;
+        // `<` and `>` are named-capture-group delimiters, not comparison operators.
+        let mut in_multiline_regex = false;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             let trimmed = line.trim_start();
@@ -299,6 +303,19 @@ impl Rule for MultipleComparison {
                 continue;
             }
 
+            // Skip multiline regex body lines. Exit when we hit the closing `/flags`.
+            if in_multiline_regex {
+                // Closing line: just `/` optionally followed by regex flags and whitespace
+                let t2 = t.trim_start_matches(|c: char| c == ' ' || c == '\t');
+                if t2.starts_with('/') {
+                    let after_slash = t2[1..].trim_start_matches(|c: char| c.is_ascii_alphabetic());
+                    if after_slash.is_empty() || after_slash.starts_with('#') || after_slash.trim().is_empty() {
+                        in_multiline_regex = false;
+                    }
+                }
+                continue;
+            }
+
             if trimmed.starts_with('#') {
                 continue;
             }
@@ -308,6 +325,25 @@ impl Rule for MultipleComparison {
             // chained comparisons (the `<<~WORD` expression is valid Ruby).
             if let Some(term) = heredoc_terminator(line) {
                 heredoc_term = Some(term);
+            }
+
+            // Detect multiline regex opener: line ends with `= /` (no closing `/`).
+            // The regex CONST = /\n  body\n/flags spans multiple lines.
+            {
+                let raw_trimmed = t;
+                let bytes = raw_trimmed.as_bytes();
+                // Look for a `/` that is a regex opener and is the last non-whitespace char
+                if bytes.last() == Some(&b'/') {
+                    // Check if the preceding non-space char is a regex-opener
+                    let prev = bytes[..bytes.len()-1].iter().rposition(|&b| b != b' ' && b != b'\t');
+                    let is_regex_opener = match prev {
+                        Some(p) => matches!(bytes[p], b'=' | b'(' | b',' | b'[' | b'!' | b'&' | b'|' | b'{' | b';' | b':'),
+                        None => true,
+                    };
+                    if is_regex_opener {
+                        in_multiline_regex = true;
+                    }
+                }
             }
 
             let sanitised = sanitise_line(line);
