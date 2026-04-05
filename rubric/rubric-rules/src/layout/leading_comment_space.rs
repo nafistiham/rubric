@@ -181,6 +181,14 @@ impl Rule for LeadingCommentSpace {
                 continue;
             }
 
+            // Skip `#:` — RDoc attribute directives (#:nodoc:, #:method:) and
+            // RBS/Steep inline type annotations (#: (String) -> bool).
+            // Skip `#|` — RBS type annotation continuation lines.
+            // RuboCop's LeadingCommentSpace cop allows these by default.
+            if bytes[1] == b':' || bytes[1] == b'|' {
+                continue;
+            }
+
             // Skip encoding/magic comments like `# encoding:`, `# frozen_string_literal:`
             let after_hash = &trimmed[1..];
             if after_hash.starts_with(" encoding:")
