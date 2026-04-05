@@ -10,7 +10,7 @@ fn detects_multiple_trailing_newlines() {
     let ctx = LintContext::new(Path::new("test.rb"), OFFENDING);
     let diags = TrailingNewlines.check_source(&ctx);
     assert!(!diags.is_empty(), "expected at least one violation");
-    assert!(diags.iter().all(|d| d.rule == "Layout/TrailingNewlines"));
+    assert!(diags.iter().all(|d| d.rule == "Layout/TrailingEmptyLines"));
 }
 
 #[test]

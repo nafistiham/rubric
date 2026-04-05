@@ -32,7 +32,7 @@ fn no_violation_when_super_with_args() {
 
 #[test]
 fn flags_initialize_without_super_word() {
-    let src = "class Foo\n  def initialize\n    @x = 1\n  end\nend\n";
+    let src = "class Foo < Bar\n  def initialize\n    @x = 1\n  end\nend\n";
     let ctx = LintContext::new(Path::new("test.rb"), src);
     let diags = MissingSuper.check_source(&ctx);
     assert!(!diags.is_empty(), "initialize without super should be flagged");
@@ -41,7 +41,7 @@ fn flags_initialize_without_super_word() {
 
 #[test]
 fn does_not_flag_super_in_string() {
-    let src = "class Foo\n  def initialize\n    @msg = \"call super here\"\n  end\nend\n";
+    let src = "class Foo < Bar\n  def initialize\n    @msg = \"call super here\"\n  end\nend\n";
     let ctx = LintContext::new(Path::new("test.rb"), src);
     let diags = MissingSuper.check_source(&ctx);
     // "super" in a string doesn't count — should still flag

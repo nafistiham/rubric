@@ -9,15 +9,16 @@ fn check(src: &str) -> Vec<rubric_core::Diagnostic> {
 
 #[test]
 fn flags_brace_block_chain_flatten() {
-    let src = "[1, 2].map { |x|\n  x * 2\n}.flatten\n";
+    // Chaining a second block onto a multiline brace block — violation
+    let src = "[1, 2].map { |x|\n  x * 2\n}.select { |x|\n  x > 1\n}\n";
     let diags = check(src);
-    assert_eq!(diags.len(), 1, "expected 1 violation for }}.flatten, got: {:?}", diags);
+    assert_eq!(diags.len(), 1, "expected 1 violation for }}.select {{ }}, got: {:?}", diags);
     assert_eq!(diags[0].rule, "Style/MultilineBlockChain");
 }
 
 #[test]
 fn message_is_correct() {
-    let src = "[1, 2].map { |x|\n  x * 2\n}.flatten\n";
+    let src = "[1, 2].map { |x|\n  x * 2\n}.select { |x|\n  x > 1\n}\n";
     let diags = check(src);
     assert!(!diags.is_empty());
     assert!(diags[0].message.contains("multi-line chains"));
@@ -25,16 +26,18 @@ fn message_is_correct() {
 
 #[test]
 fn flags_do_end_block_chain() {
-    let src = "[1, 2].map do |x|\n  x * 2\nend.flatten\n";
+    // Chaining a second block onto a multiline do..end block — violation
+    let src = "[1, 2].map do |x|\n  x * 2\nend.select do |x|\n  x > 1\nend\n";
     let diags = check(src);
-    assert_eq!(diags.len(), 1, "expected 1 violation for end.flatten, got: {:?}", diags);
+    assert_eq!(diags.len(), 1, "expected 1 violation for end.select do, got: {:?}", diags);
 }
 
 #[test]
 fn flags_brace_block_chain_multiple_methods() {
-    let src = "arr.map { |x|\n  x\n}.compact.flatten\n";
+    // Chaining a second block after intermediate method call — violation
+    let src = "arr.map { |x|\n  x\n}.select { |x|\n  x > 0\n}\n";
     let diags = check(src);
-    assert_eq!(diags.len(), 1, "expected 1 violation for }}.compact.flatten, got: {:?}", diags);
+    assert_eq!(diags.len(), 1, "expected 1 violation for }}.select {{ }}, got: {:?}", diags);
 }
 
 #[test]
@@ -89,9 +92,10 @@ fn no_violation_for_inspect_chain() {
 
 #[test]
 fn flags_indented_block_chain() {
-    let src = "  arr.map { |x|\n    x\n  }.sort\n";
+    // Indented multiline block chained with a second block — violation
+    let src = "  arr.map { |x|\n    x\n  }.select { |x|\n    x > 0\n  }\n";
     let diags = check(src);
-    assert_eq!(diags.len(), 1, "indented }}.sort should be flagged, got: {:?}", diags);
+    assert_eq!(diags.len(), 1, "indented }}.select {{ }} should be flagged, got: {:?}", diags);
 }
 
 #[test]

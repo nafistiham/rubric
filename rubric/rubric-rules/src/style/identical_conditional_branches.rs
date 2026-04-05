@@ -54,9 +54,9 @@ fn is_if_opener(trimmed: &str) -> bool {
 }
 
 /// Given the index of an `if` line, look for the pattern:
-/// ```
+/// ```text
 /// if condition        <- line i
-///   [one body line]   <- line i+1 (non-blank, non-`else`/`elsif`/`end`)
+///   [one body line]   <- line i+1 (non-blank, not else/elsif/end)
 /// else                <- line i+2 trimmed == "else"
 ///   [same body line]  <- line i+3 trimmed matches line i+1 trimmed
 /// end                 <- line i+4 trimmed == "end"
