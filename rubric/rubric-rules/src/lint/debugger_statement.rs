@@ -11,7 +11,8 @@ static DEBUGGER_PATTERNS: &[(&[u8], &str)] = &[
     (b"binding.break",      "binding.break"),
     (b"binding.pry",        "binding.pry"),
     (b"remote_byebug",      "remote_byebug"),
-    (b"Pry.start",          "Pry.start"),
+    // NOTE: `Pry.start` is NOT in RuboCop's default DebuggerMethods list,
+    // so we omit it to match RuboCop's default behavior.
     (b"byebug",             "byebug"),
     (b"debugger",           "debugger"),
 ];
