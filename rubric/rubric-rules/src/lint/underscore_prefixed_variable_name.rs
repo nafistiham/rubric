@@ -2,6 +2,44 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct UnderscorePrefixedVariableName;
 
+/// Returns true if column `col` in `line` is inside a string or regex literal.
+/// Only scans the current line, so cross-line state corruption cannot occur.
+fn in_string_or_regex(line: &[u8], col: usize) -> bool {
+    let mut in_delim: Option<u8> = None;
+    let mut i = 0;
+    while i < col && i < line.len() {
+        let b = line[i];
+        if let Some(d) = in_delim {
+            if b == b'\\' { i += 2; continue; }
+            if b == d { in_delim = None; }
+        } else {
+            match b {
+                b'"' | b'\'' => { in_delim = Some(b); }
+                b'/' => {
+                    // Distinguish regex `/` from division `/`.
+                    // Same heuristic as semicolon.rs: `/` is a regex start when
+                    // preceded by whitespace, `(`, `,`, `=`, operator chars, or
+                    // an alphanumeric/`_` (method name like `match`, `not_to`).
+                    let prev = line[..i].iter().rposition(|&b| b != b' ' && b != b'\t')
+                        .map(|p| line[p]);
+                    let is_regex_ctx = matches!(prev, None
+                        | Some(b'(') | Some(b',') | Some(b'=') | Some(b'!')
+                        | Some(b'|') | Some(b'&') | Some(b'?') | Some(b':')
+                        | Some(b'[') | Some(b'{'))
+                        || prev.map_or(false, |c| c.is_ascii_alphabetic() || c == b'_');
+                    if is_regex_ctx {
+                        in_delim = Some(b'/');
+                    }
+                }
+                b'#' => break, // comment — nothing after counts
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    in_delim.is_some()
+}
+
 impl Rule for UnderscorePrefixedVariableName {
     fn name(&self) -> &'static str {
         "Lint/UnderscorePrefixedVariableName"
@@ -47,13 +85,14 @@ impl Rule for UnderscorePrefixedVariableName {
                         // Find which line this occurrence is on.
                         let line_of_occurrence = ctx.line_start_offsets.partition_point(|&o| o as usize <= pos).saturating_sub(1);
                         if line_of_occurrence != *assign_line {
+                            let line_start = ctx.line_start_offsets[line_of_occurrence] as usize;
+                            let pos_in_line = pos - line_start;
+                            let line_bytes = lines[line_of_occurrence].as_bytes();
+
                             // Skip occurrences that are themselves LHS assignments
                             // of the same variable (e.g. `_tag = ...` in another block).
                             // Only count as a use when the occurrence is a read.
                             let is_lhs_assignment = {
-                                let line_start = ctx.line_start_offsets[line_of_occurrence] as usize;
-                                let pos_in_line = pos - line_start;
-                                let line_bytes = lines[line_of_occurrence].as_bytes();
                                 let after_var = &line_bytes[pos_in_line + vn..];
                                 let mut k = 0;
                                 while k < after_var.len() && after_var[k] == b' ' { k += 1; }
@@ -62,7 +101,10 @@ impl Rule for UnderscorePrefixedVariableName {
                                     && (k + 1 >= after_var.len()
                                         || (after_var[k + 1] != b'=' && after_var[k + 1] != b'>'))
                             };
-                            if !is_lhs_assignment {
+                            // Skip occurrences inside string/regex literals — their
+                            // content is not a variable reference
+                            // (e.g. `"show-source _c.new.method"` or `/_version/`).
+                            if !is_lhs_assignment && !in_string_or_regex(line_bytes, pos_in_line) {
                                 used = true;
                                 break;
                             }

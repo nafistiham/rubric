@@ -10,7 +10,7 @@ fn detects_debugger_statements() {
     let ctx = LintContext::new(Path::new("test.rb"), OFFENDING);
     let diags = DebuggerStatement.check_source(&ctx);
     assert!(!diags.is_empty(), "expected violations, got none");
-    assert!(diags.iter().all(|d| d.rule == "Lint/DebuggerStatement"));
+    assert!(diags.iter().all(|d| d.rule == "Lint/Debugger"));
 }
 
 #[test]
@@ -82,11 +82,13 @@ fn skips_heredoc_body() {
 }
 
 #[test]
-fn detects_pry_start() {
+fn does_not_flag_pry_start() {
+    // Pry.start is NOT in RuboCop's default DebuggerMethods list,
+    // so we do not flag it to match RuboCop's default behaviour.
     let src = "Pry.start\n";
     let ctx = LintContext::new(Path::new("test.rb"), src);
     let diags = DebuggerStatement.check_source(&ctx);
-    assert!(!diags.is_empty(), "Pry.start should be flagged");
+    assert!(diags.is_empty(), "Pry.start should not be flagged, got: {:?}", diags);
 }
 
 #[test]
