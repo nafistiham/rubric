@@ -59,6 +59,7 @@ const BUILTIN_GLOBALS: &[&str] = &[
     "$OFS",
     "$INPUT_SEPARATOR",
     "$FS",
+    "$FIELD_SEPARATOR",
     "$OUTPUT_AUTO_FLUSH",
     "$LAST_READ_LINE",
     "$DEFAULT_OUTPUT",
@@ -67,9 +68,12 @@ const BUILTIN_GLOBALS: &[&str] = &[
     "$PROCESS_ID",
     "$CHILD_STATUS",
     "$LAST_EXIT_STATUS",
+    "$ERROR_INFO",
+    "$ERROR_POSITION",
     "$IGNORECASE",
     "$FILENAME",
     "$ARGV",
+    "$KCODE",
     // Perl-style backrefs $1-$9 are handled by PerlBackrefs; skip them here too
 ];
 
