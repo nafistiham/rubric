@@ -40,6 +40,15 @@ impl Rule for StringLiterals {
             return vec![];
         }
 
+        // Skip inner string fragments (parts of an interpolated `%(...)` or similar) that
+        // have no opening delimiter. These fragments don't start with a quote char as delimiter.
+        let has_opening_delim = node.as_string_node()
+            .and_then(|n| n.opening_loc())
+            .is_some();
+        if !has_opening_delim {
+            return vec![];
+        }
+
         if self.double_quotes {
             // Prefer double-quoted: flag single-quoted strings
             if node_src.first() != Some(&b'\'') {
