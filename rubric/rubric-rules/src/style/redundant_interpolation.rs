@@ -60,8 +60,22 @@ impl Rule for RedundantInterpolation {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        // Cross-line heredoc tracking: when Some, we're inside a heredoc body and
+        // the value is the expected terminator (bare identifier, no <<~/-).
+        let mut in_heredoc: Option<String> = None;
 
         for (line_idx, line) in ctx.lines.iter().enumerate() {
+            // Skip heredoc body lines — `"` chars inside are literal content, not
+            // Ruby string delimiters, so interpolation detection would be wrong.
+            if let Some(ref term) = in_heredoc {
+                if line.trim_end_matches(['\r', '\n']) == term.as_str()
+                    || line.trim_end_matches(['\r', '\n']).trim_start() == term.as_str()
+                {
+                    in_heredoc = None;
+                }
+                continue;
+            }
+
             let trimmed = line.trim_start();
             // Skip full-line comments
             if trimmed.starts_with('#') {
@@ -77,6 +91,7 @@ impl Rule for RedundantInterpolation {
             let mut percent_close: u8 = 0;
             let mut percent_open: u8 = 0;
             let mut percent_depth: i32 = 0;
+            let mut in_regex = false; // inside /regex/ — `"` chars are literal
 
             while i < n {
                 let b = bytes[i];
@@ -102,6 +117,14 @@ impl Rule for RedundantInterpolation {
                     continue;
                 }
 
+                // Track /regex/ context — `"` inside regex is a literal char
+                if in_regex {
+                    if b == b'\\' { i += 2; continue; }
+                    if b == b'/' { in_regex = false; }
+                    i += 1;
+                    continue;
+                }
+
                 // Track single-quoted strings (no interpolation inside)
                 if in_single_quote {
                     match b {
@@ -115,6 +138,20 @@ impl Rule for RedundantInterpolation {
 
                 match b {
                     b'#' => break, // inline comment — stop scanning
+                    b'/' => {
+                        // Detect regex opener: preceded by =, (, ,, [, !, |, &, ?, :, ;, {
+                        let prev_nonws = bytes[..i].iter().rposition(|&c| c != b' ' && c != b'\t')
+                            .map(|p| bytes[p]);
+                        if matches!(prev_nonws, None
+                            | Some(b'=') | Some(b'(') | Some(b',') | Some(b'[')
+                            | Some(b'!') | Some(b'|') | Some(b'&') | Some(b'?')
+                            | Some(b':') | Some(b';') | Some(b'{') | Some(b'>')) {
+                            in_regex = true;
+                            i += 1;
+                            continue;
+                        }
+                        i += 1;
+                    }
                     b'%' if i + 1 < n => {
                         // Detect percent literals: %(, %Q(, %q(, %w(, %W(, %r!, etc.
                         let next = bytes[i + 1];
@@ -177,6 +214,29 @@ impl Rule for RedundantInterpolation {
                     _ => {
                         i += 1;
                     }
+                }
+            }
+
+            // Detect heredoc opener on this line: <<~TERM, <<-TERM, <<TERM
+            // (also handles quoted terminators like <<~'TERM' or <<~"TERM")
+            if in_heredoc.is_none() {
+                let raw = line;
+                let mut search = raw.as_bytes();
+                while let Some(pos) = search.windows(2).position(|w| w == b"<<") {
+                    let rest = &search[pos + 2..];
+                    // Strip optional ~ or -
+                    let rest = rest.strip_prefix(b"~").unwrap_or(rest);
+                    let rest = rest.strip_prefix(b"-").unwrap_or(rest);
+                    // Strip optional quote around terminator
+                    let rest = rest.strip_prefix(b"'").unwrap_or_else(|| rest.strip_prefix(b"\"").unwrap_or(rest));
+                    // Read identifier chars
+                    let term_end = rest.iter().position(|&b| !b.is_ascii_alphanumeric() && b != b'_').unwrap_or(rest.len());
+                    if term_end > 0 {
+                        let term = std::str::from_utf8(&rest[..term_end]).unwrap_or("").to_string();
+                        in_heredoc = Some(term);
+                        break;
+                    }
+                    search = &search[pos + 2..];
                 }
             }
         }
