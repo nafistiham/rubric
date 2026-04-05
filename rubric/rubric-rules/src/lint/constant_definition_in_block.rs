@@ -84,6 +84,30 @@ fn heredoc_delimiter(trimmed: &str) -> Option<String> {
     None
 }
 
+/// Scan a line for an unclosed single or double-quoted string.
+/// Returns `Some(delim)` if the string is still open at end of line.
+/// Stops at an unquoted `#` (comment start).
+fn detect_unclosed_string(line: &str) -> Option<u8> {
+    let bytes = line.as_bytes();
+    let mut in_str: Option<u8> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(d) = in_str {
+            if b == b'\\' { i += 2; continue; }
+            if b == d { in_str = None; }
+        } else {
+            match b {
+                b'\'' | b'"' => { in_str = Some(b); }
+                b'#' => break,
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    in_str
+}
+
 pub struct ConstantDefinitionInBlock;
 
 impl Rule for ConstantDefinitionInBlock {
@@ -100,6 +124,11 @@ impl Rule for ConstantDefinitionInBlock {
         let mut block_depth = 0usize;
         // Track active heredoc closing delimiter; while set, skip body lines.
         let mut heredoc_end: Option<String> = None;
+        // Track multiline single/double-quoted strings.
+        let mut in_multiline_string: Option<u8> = None;
+        // Track depth inside `%(...)` percent strings (or `%[...]` etc.).
+        let mut percent_string_depth: i32 = 0;
+        let mut percent_string_close: u8 = b')';
 
         for i in 0..n {
             let line = &lines[i];
@@ -114,6 +143,34 @@ impl Rule for ConstantDefinitionInBlock {
                 continue;
             }
 
+            // Handle multiline single/double-quoted string body.
+            if let Some(string_delim) = in_multiline_string {
+                let bytes = line.as_bytes();
+                let mut j = 0;
+                while j < bytes.len() {
+                    if bytes[j] == b'\\' { j += 2; continue; }
+                    if bytes[j] == string_delim { in_multiline_string = None; break; }
+                    j += 1;
+                }
+                continue; // skip body lines regardless
+            }
+
+            // Handle percent-string body (e.g. `%(`, `%[`, `%{`).
+            if percent_string_depth > 0 {
+                let bytes = line.as_bytes();
+                let open = if percent_string_close == b')' { b'(' }
+                    else if percent_string_close == b']' { b'[' }
+                    else { b'{' };
+                for &b in bytes {
+                    if b == open { percent_string_depth += 1; }
+                    else if b == percent_string_close {
+                        percent_string_depth -= 1;
+                        if percent_string_depth == 0 { break; }
+                    }
+                }
+                continue; // skip body lines
+            }
+
             if trimmed.starts_with('#') {
                 continue;
             }
@@ -122,6 +179,42 @@ impl Rule for ConstantDefinitionInBlock {
             if let Some(delim) = heredoc_delimiter(trimmed) {
                 heredoc_end = Some(delim);
                 // Still process the current line for block-depth changes below.
+            }
+
+            // Detect percent string opening on this line (e.g. `%(`).
+            {
+                let bytes = trimmed.as_bytes();
+                let len = bytes.len();
+                let mut j = 0;
+                while j + 1 < len {
+                    if bytes[j] == b'%' {
+                        let c = bytes[j + 1];
+                        let (open, close) = match c {
+                            b'(' => (b'(', b')'),
+                            b'[' => (b'[', b']'),
+                            b'{' => (b'{', b'}'),
+                            _ => { j += 1; continue; }
+                        };
+                        // Found `%(`, `%[`, or `%{` — scan remainder of line for closing delim
+                        let mut depth: i32 = 1;
+                        let mut k = j + 2;
+                        while k < len {
+                            if bytes[k] == open { depth += 1; }
+                            else if bytes[k] == close {
+                                depth -= 1;
+                                if depth == 0 { break; }
+                            }
+                            k += 1;
+                        }
+                        if depth > 0 {
+                            // Unclosed on this line — body continues on next lines
+                            percent_string_depth = depth;
+                            percent_string_close = close;
+                        }
+                        break;
+                    }
+                    j += 1;
+                }
             }
 
             // Determine if this line opens a `do...end` block.
@@ -167,6 +260,12 @@ impl Rule for ConstantDefinitionInBlock {
                         }
                     }
                 }
+            }
+
+            // Detect if this line opens a multiline string (unclosed quote at line end).
+            // Body lines of such strings must not be checked for constant definitions.
+            if percent_string_depth == 0 && heredoc_end.is_none() {
+                in_multiline_string = detect_unclosed_string(line);
             }
         }
 
