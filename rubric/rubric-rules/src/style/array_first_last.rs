@@ -9,6 +9,21 @@ fn is_access_predecessor(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b')' || b == b']'
 }
 
+/// Returns true if `[0]` or `[-1]` at `close_pos` (index of `]`) is an lvalue —
+/// i.e. immediately followed by `=` but not `==`.
+fn is_subscript_lvalue(bytes: &[u8], close_pos: usize) -> bool {
+    let mut i = close_pos + 1;
+    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+        i += 1;
+    }
+    if i < bytes.len() && bytes[i] == b'=' {
+        // `=` but not `==` or `=>`
+        let next = bytes.get(i + 1).copied();
+        return next != Some(b'=') && next != Some(b'>');
+    }
+    false
+}
+
 impl Rule for ArrayFirstLast {
     fn name(&self) -> &'static str {
         "Style/ArrayFirstLast"
@@ -56,7 +71,7 @@ impl Rule for ArrayFirstLast {
                         // Check for [0] pattern
                         if j + 2 < n && bytes[j + 1] == b'0' && bytes[j + 2] == b']' {
                             let preceded_by_access = j > 0 && is_access_predecessor(bytes[j - 1]);
-                            if preceded_by_access {
+                            if preceded_by_access && !is_subscript_lvalue(bytes, j + 2) {
                                 let start = (line_start + j) as u32;
                                 let end = start + 3; // [0]
                                 diags.push(Diagnostic {
@@ -65,9 +80,9 @@ impl Rule for ArrayFirstLast {
                                     range: TextRange::new(start, end),
                                     severity: Severity::Warning,
                                 });
-                                j += 3;
-                                continue;
                             }
+                            j += 3;
+                            continue;
                         }
                         // Check for [-1] pattern
                         if j + 3 < n
@@ -76,7 +91,7 @@ impl Rule for ArrayFirstLast {
                             && bytes[j + 3] == b']'
                         {
                             let preceded_by_access = j > 0 && is_access_predecessor(bytes[j - 1]);
-                            if preceded_by_access {
+                            if preceded_by_access && !is_subscript_lvalue(bytes, j + 3) {
                                 let start = (line_start + j) as u32;
                                 let end = start + 4; // [-1]
                                 diags.push(Diagnostic {
@@ -85,9 +100,9 @@ impl Rule for ArrayFirstLast {
                                     range: TextRange::new(start, end),
                                     severity: Severity::Warning,
                                 });
-                                j += 4;
-                                continue;
                             }
+                            j += 4;
+                            continue;
                         }
                     }
                     _ => {}
