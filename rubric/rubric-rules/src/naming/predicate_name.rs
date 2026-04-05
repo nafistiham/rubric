@@ -4,6 +4,10 @@ pub struct PredicateName;
 
 const FORBIDDEN_PREFIXES: &[&str] = &["is_", "has_", "have_"];
 
+/// Methods that match a forbidden prefix pattern but are Ruby built-ins or
+/// commonly accepted names — rubocop's default AllowedMethods list.
+const ALLOWED_METHODS: &[&str] = &["is_a?", "is_haml?", "is_erb?", "is_slim?"];
+
 impl Rule for PredicateName {
     fn name(&self) -> &'static str {
         "Naming/PredicateName"
@@ -43,6 +47,11 @@ impl Rule for PredicateName {
 
             // Must end with `?` to be a predicate
             if !method_name.ends_with('?') {
+                continue;
+            }
+
+            // Skip allowed methods (Ruby built-ins that happen to have forbidden prefixes)
+            if ALLOWED_METHODS.contains(&method_name) {
                 continue;
             }
 

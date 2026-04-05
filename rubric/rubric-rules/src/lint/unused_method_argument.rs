@@ -145,15 +145,32 @@ impl Rule for UnusedMethodArgument {
             return vec![];
         }
 
-        // Body source range
-        let body_loc = body.location();
-        let body_start = body_loc.start_offset();
-        let body_end = body_loc.end_offset();
+        // Body source range.
+        // NOTE: In prism, heredoc nodes have location() pointing only to the
+        // opening `<<~TERM` token, not the body lines. The heredoc body bytes
+        // are physically present in the file between the opening statement line
+        // and the `end` keyword. To capture them we extend the search range to
+        // the end of the entire `def...end` block.
+        let body_start = body.location().start_offset();
+        let def_end = def_node.location().end_offset();
         let src = ctx.source.as_bytes();
-        if body_end > src.len() {
+        if def_end > src.len() {
             return vec![];
         }
-        let body_src = &src[body_start..body_end];
+        let body_src = &src[body_start..def_end];
+
+        // IgnoreNotImplementedMethods: skip methods whose body is just
+        // `raise NotImplementedError` / `fail NotImplementedError` (any variant).
+        let body_trimmed = std::str::from_utf8(body_src).unwrap_or("").trim();
+        let is_not_implemented = {
+            let b = body_trimmed;
+            b.starts_with("raise NotImplementedError") || b.starts_with("fail NotImplementedError")
+                || b.starts_with("raise AbstractMethodNotOverriddenError")
+                || b.starts_with("fail AbstractMethodNotOverriddenError")
+        };
+        if is_not_implemented {
+            return vec![];
+        }
 
         // If the body contains bare `super` (not `super()` which passes nothing),
         // all arguments are implicitly forwarded — nothing to flag.
@@ -191,7 +208,14 @@ impl Rule for UnusedMethodArgument {
             if name_bytes.is_empty() {
                 continue;
             }
-            if !name_used_in_source(name_bytes, body_src) {
+            // Search from the end of this parameter's name to the end of the
+            // entire `def...end` block. This covers:
+            //   1. The rest of the parameter list (e.g. `withvalues: false,
+            //      with_values: withvalues` — `withvalues` used as default)
+            //   2. The method body (including heredoc bodies via def_end)
+            let search_start = (*name_end as usize).min(def_end);
+            let search_src = &src[search_start..def_end];
+            if !name_used_in_source(name_bytes, search_src) {
                 let name_str = std::str::from_utf8(name_bytes).unwrap_or("?");
                 diags.push(Diagnostic {
                     rule: self.name(),

@@ -158,6 +158,80 @@ fn is_trailing_semicolon(line: &str, pos: usize) -> bool {
     line[pos + 1..].trim().is_empty()
 }
 
+/// Returns true if `line` opens a multiline regex (a regex-start `/` with no
+/// matching closing `/` on the same line). Used to track cross-line state so
+/// that `;` inside multiline regex character classes (`[!$()*+,;=]`) are not
+/// flagged.
+fn opens_multiline_regex(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let n = bytes.len();
+    let mut i = 0;
+    let mut in_string: Option<u8> = None; // inside '...' or "..."
+
+    while i < n {
+        let b = bytes[i];
+
+        if let Some(delim) = in_string {
+            if b == b'\\' {
+                i += 2;
+                continue;
+            }
+            if b == delim {
+                in_string = None;
+            }
+            i += 1;
+            continue;
+        }
+
+        match b {
+            b'#' => break, // comment — stop
+            b'\'' | b'"' => {
+                in_string = Some(b);
+                i += 1;
+            }
+            b'/' => {
+                // Check if this `/` is a regex opener
+                let prev_non_space = (0..i)
+                    .rev()
+                    .find(|&j| bytes[j] != b' ' && bytes[j] != b'\t')
+                    .map(|j| bytes[j]);
+                let is_regex_start = match prev_non_space {
+                    None => true,
+                    Some(c) => matches!(c, b'=' | b'(' | b',' | b'[' | b'!' | b'&' | b'|'
+                        | b'{' | b';' | b':' | b'<' | b'>' | b'+' | b'-' | b'*'
+                        | b'%' | b'^' | b'~' | b'?' | b'\n'),
+                };
+                if is_regex_start {
+                    // Scan forward for a closing unescaped `/`
+                    let mut j = i + 1;
+                    let mut found_close = false;
+                    while j < n {
+                        match bytes[j] {
+                            b'\\' => { j += 2; continue; }
+                            b'/' => { found_close = true; break; }
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                    if !found_close {
+                        return true;
+                    }
+                    // Skip past the closed regex
+                    i = j + 1;
+                    // Skip flags (i, m, x, etc.)
+                    while i < n && bytes[i].is_ascii_alphabetic() {
+                        i += 1;
+                    }
+                    continue;
+                }
+                i += 1;
+            }
+            _ => { i += 1; }
+        }
+    }
+    false
+}
+
 impl Rule for Semicolon {
     fn name(&self) -> &'static str {
         "Style/Semicolon"
@@ -166,6 +240,7 @@ impl Rule for Semicolon {
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
         let mut in_heredoc: Option<String> = None;
+        let mut in_multiline_regex = false;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             // Skip heredoc body lines — `;` inside are non-Ruby content
@@ -174,6 +249,21 @@ impl Rule for Semicolon {
                     || line.trim_end_matches(['\r', '\n']).trim_start() == term.as_str()
                 {
                     in_heredoc = None;
+                }
+                continue;
+            }
+
+            // Skip multiline regex body lines. Exit when we hit the closing `/flags`.
+            if in_multiline_regex {
+                let t = line.trim();
+                if t.starts_with('/') {
+                    let after = t[1..].trim_start_matches(|c: char| c.is_ascii_alphabetic());
+                    if after.is_empty() || after.starts_with('#') || after.trim().is_empty() {
+                        in_multiline_regex = false;
+                    }
+                } else if t.starts_with(")/") || t.starts_with("}/" ) {
+                    // )/iox or }/iox closing a grouped multiline regex
+                    in_multiline_regex = false;
                 }
                 continue;
             }
@@ -231,6 +321,11 @@ impl Rule for Semicolon {
                     range: TextRange::new(start, end),
                     severity: Severity::Warning,
                 });
+            }
+
+            // Detect multiline regex opener on this line.
+            if !in_multiline_regex && opens_multiline_regex(line) {
+                in_multiline_regex = true;
             }
 
             // Detect heredoc opener on this line
