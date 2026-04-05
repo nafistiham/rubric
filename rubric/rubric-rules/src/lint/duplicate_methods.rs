@@ -170,8 +170,8 @@ fn heredoc_marker(line: &str) -> Option<String> {
     loop {
         let pos = rest.find("<<")?;
         let after = &rest[pos + 2..];
-        // Skip optional ~
-        let after = after.strip_prefix('~').unwrap_or(after);
+        // Skip optional ~ or -
+        let after = after.strip_prefix('~').or_else(|| after.strip_prefix('-')).unwrap_or(after);
         // Skip optional quote char
         let (after, _quoted) = if after.starts_with('"') || after.starts_with('\'') || after.starts_with('`') {
             (&after[1..], true)
