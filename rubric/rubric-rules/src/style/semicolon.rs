@@ -165,8 +165,19 @@ impl Rule for Semicolon {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        let mut in_heredoc: Option<String> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
+            // Skip heredoc body lines — `;` inside are non-Ruby content
+            if let Some(ref term) = in_heredoc {
+                if line.trim_end_matches(['\r', '\n']) == term.as_str()
+                    || line.trim_end_matches(['\r', '\n']).trim_start() == term.as_str()
+                {
+                    in_heredoc = None;
+                }
+                continue;
+            }
+
             let trimmed = line.trim_start();
 
             // Skip full comment lines
@@ -220,6 +231,25 @@ impl Rule for Semicolon {
                     range: TextRange::new(start, end),
                     severity: Severity::Warning,
                 });
+            }
+
+            // Detect heredoc opener on this line
+            if in_heredoc.is_none() {
+                let bytes = line.as_bytes();
+                let mut search = bytes;
+                while let Some(pos) = search.windows(2).position(|w| w == b"<<") {
+                    let rest = &search[pos + 2..];
+                    let rest = rest.strip_prefix(b"~").unwrap_or(rest);
+                    let rest = rest.strip_prefix(b"-").unwrap_or(rest);
+                    let rest = rest.strip_prefix(b"'").unwrap_or_else(|| rest.strip_prefix(b"\"").unwrap_or(rest));
+                    let term_end = rest.iter().position(|&b| !b.is_ascii_alphanumeric() && b != b'_').unwrap_or(rest.len());
+                    if term_end > 0 {
+                        let term = std::str::from_utf8(&rest[..term_end]).unwrap_or("").to_string();
+                        in_heredoc = Some(term);
+                        break;
+                    }
+                    search = &search[pos + 2..];
+                }
             }
         }
 
