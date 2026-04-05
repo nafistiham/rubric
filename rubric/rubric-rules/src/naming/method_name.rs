@@ -60,6 +60,11 @@ impl Rule for MethodName {
                 .unwrap_or(after_def.len());
             let raw_name = &after_def[..name_end];
 
+            // Skip dynamically generated method names (inside class_eval heredocs / string templates)
+            if raw_name.contains("#{") {
+                continue;
+            }
+
             // Strip receiver prefix: `self.method`, `obj.method` → take the part after the last `.`
             let method_name = if let Some(dot) = raw_name.rfind('.') {
                 &raw_name[dot + 1..]
