@@ -127,6 +127,15 @@ impl Rule for NumericLiterals {
                         continue;
                     }
 
+                    // Skip numbers that are part of an identifier, symbol name, or
+                    // method name (e.g. `:index_20180106`, `func_name123`, `0abc`).
+                    if token_start > 0 {
+                        let prev = scan_bytes[token_start - 1];
+                        if prev.is_ascii_alphanumeric() || prev == b'_' {
+                            continue;
+                        }
+                    }
+
                     // Count only digit characters (no underscores, no dots)
                     let digit_count = token.chars().filter(|c| c.is_ascii_digit()).count();
                     let has_underscore = token.contains('_');
