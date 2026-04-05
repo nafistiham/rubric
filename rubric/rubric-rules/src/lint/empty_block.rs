@@ -31,7 +31,23 @@ impl Rule for EmptyBlock {
                 b"if", b"unless", b"while", b"until", b"in", b"and", b"or", b"not",
             ];
 
+            let mut in_string: Option<u8> = None;
             while j < len {
+                let b = bytes[j];
+                // Track string literals so we don't flag `{}` inside strings
+                if let Some(delim) = in_string {
+                    if b == b'\\' { j += 2; continue; }
+                    if b == delim { in_string = None; }
+                    j += 1;
+                    continue;
+                }
+                if b == b'"' || b == b'\'' {
+                    in_string = Some(b);
+                    j += 1;
+                    continue;
+                }
+                if b == b'#' { break; } // comment
+
                 if bytes[j] == b'{' {
                     let open_pos = j;
                     j += 1;
@@ -80,7 +96,12 @@ impl Rule for EmptyBlock {
                                     word_start -= 1;
                                 }
                                 let word = &bytes[word_start..=word_end];
-                                !HASH_KEYWORDS.contains(&word)
+                                // Standalone `?` is the ternary operator — `{}` after it is a hash
+                                if word == b"?" {
+                                    false
+                                } else {
+                                    !HASH_KEYWORDS.contains(&word)
+                                }
                             } else {
                                 // Preceded by operator/punctuation (`=`, `|`, `(`, `,`, etc.) → hash
                                 false
