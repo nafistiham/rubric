@@ -94,8 +94,24 @@ impl Rule for NumericLiterals {
             let mut pos = 0;
             let mut in_string: Option<u8> = None; // inside "..." or '...'
             let mut in_regex = false;              // inside /regex/
+            // Percent literal: Some((close_byte, depth)) — numbers inside are strings
+            let mut in_pct: Option<(u8, i32)> = None;
             while pos < scan_bytes.len() {
                 let b = scan_bytes[pos];
+
+                // Track percent literal context (numbers inside are strings/symbols)
+                if let Some((close, ref mut depth)) = in_pct {
+                    if b == b'\\' { pos += 2; continue; }
+                    // For bracket-paired delimiters, track nesting
+                    let open = match close { b')' => b'(', b']' => b'[', b'}' => b'{', b'>' => b'<', _ => 0 };
+                    if open != 0 && b == open { *depth += 1; }
+                    else if b == close {
+                        if *depth > 0 { *depth -= 1; }
+                        else { in_pct = None; }
+                    }
+                    pos += 1;
+                    continue;
+                }
 
                 // Track string/regex context
                 if let Some(delim) = in_string {
@@ -111,9 +127,27 @@ impl Rule for NumericLiterals {
                     continue;
                 }
 
-                // Detect string/regex openers
+                // Detect string/regex/percent-literal openers
                 match b {
                     b'"' | b'\'' => { in_string = Some(b); pos += 1; continue; }
+                    b'%' if pos + 1 < scan_bytes.len() => {
+                        // Skip any percent literal form: %w[], %i[], %r{}, %(), etc.
+                        let mut k = pos + 1;
+                        if k < scan_bytes.len() && scan_bytes[k].is_ascii_alphabetic() { k += 1; }
+                        if k < scan_bytes.len() {
+                            let open = scan_bytes[k];
+                            let close = match open {
+                                b'(' => b')', b'[' => b']', b'{' => b'}', b'<' => b'>',
+                                c if c.is_ascii_punctuation() => c,
+                                _ => { pos += 1; continue; }
+                            };
+                            in_pct = Some((close, 0));
+                            pos = k + 1;
+                            continue;
+                        }
+                        pos += 1;
+                        continue;
+                    }
                     b'/' => {
                         // Regex if preceded by =, (, ,, [, space/start, !, |, &, ?, :
                         let prev_nonws = scan_bytes[..pos].iter().rposition(|&c| c != b' ' && c != b'\t')
@@ -166,8 +200,11 @@ impl Rule for NumericLiterals {
                         }
                     }
 
-                    // Count only digit characters (no underscores, no dots)
-                    let digit_count = token.chars().filter(|c| c.is_ascii_digit()).count();
+                    // Count only digits in the integer part (before any decimal point).
+                    // RuboCop's MinDigits applies to the integer portion only, not the
+                    // decimal digits (e.g. `5000.00` has 4 integer digits → not flagged).
+                    let integer_part = token.split('.').next().unwrap_or(token);
+                    let digit_count = integer_part.chars().filter(|c| c.is_ascii_digit()).count();
                     let has_underscore = token.contains('_');
 
                     if digit_count >= MIN_DIGITS && !has_underscore {
