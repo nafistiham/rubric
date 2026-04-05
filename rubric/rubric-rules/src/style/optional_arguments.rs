@@ -17,9 +17,27 @@ impl Rule for OptionalArguments {
                 continue;
             }
 
-            // Extract the parameter list between ( and )
+            // Extract the parameter list between ( and ).
+            // Use depth tracking to find the MATCHING close paren, not the last `)`.
+            // This avoids false matches in endless methods like `def foo(a) = bar(b)`.
             let Some(open_paren) = line.find('(') else { continue; };
-            let Some(close_paren) = line.rfind(')') else { continue; };
+            let bytes = line.as_bytes();
+            let mut depth = 0i32;
+            let mut close_paren = None;
+            for (idx, &b) in bytes.iter().enumerate().skip(open_paren) {
+                match b {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            close_paren = Some(idx);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let Some(close_paren) = close_paren else { continue; };
             if close_paren <= open_paren {
                 continue;
             }
