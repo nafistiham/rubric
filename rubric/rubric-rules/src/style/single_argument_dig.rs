@@ -123,12 +123,16 @@ impl Rule for SingleArgumentDig {
                         // `j` is one past the closing paren
                         let args_end = j - 1; // index of the closing paren
 
-                        // Count commas — 0 commas means single argument
+                        // Count commas — 0 commas means single argument.
+                        // But splat `*expr` can expand to many args: skip those.
                         let comma_count = count_top_level_commas(bytes, args_start, args_end);
                         if comma_count == 0 {
                             // Make sure the argument list is non-empty
                             let arg_content = &bytes[args_start..args_end];
-                            if !arg_content.iter().all(|b| b.is_ascii_whitespace()) {
+                            let first_non_ws = arg_content.iter().find(|&&b| !b.is_ascii_whitespace()).copied();
+                            if !arg_content.iter().all(|b| b.is_ascii_whitespace())
+                                && first_non_ws != Some(b'*')  // skip splat args
+                            {
                                 let abs_start = (line_start + search) as u32;
                                 let abs_end = (line_start + j) as u32;
                                 diags.push(Diagnostic {
