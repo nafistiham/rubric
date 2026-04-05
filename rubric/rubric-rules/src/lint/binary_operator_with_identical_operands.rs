@@ -172,6 +172,22 @@ impl Rule for BinaryOperatorWithIdenticalOperands {
                         continue;
                     }
 
+                    // Skip if the non-whitespace character before LHS is a binary operator
+                    // (meaning the LHS is actually a RHS of a sub-expression).
+                    // E.g. `a & b != b` — `b` before `!=` is part of `a & b`, not standalone.
+                    let before_lhs_char = before_trimmed[..lhs_start].trim_end()
+                        .as_bytes().last().copied();
+                    let lhs_preceded_by_operator = matches!(
+                        before_lhs_char,
+                        Some(b'&') | Some(b'|') | Some(b'+') | Some(b'-')
+                            | Some(b'*') | Some(b'/') | Some(b'^') | Some(b'%')
+                            | Some(b'<') | Some(b'>') | Some(b'=') | Some(b'!')
+                    );
+                    if lhs_preceded_by_operator {
+                        search = abs_op + op_bytes.len();
+                        continue;
+                    }
+
                     // Read RHS: word immediately after the operator (trimming whitespace)
                     let after_op = abs_op + op_bytes.len();
                     let after = &line[after_op..];
