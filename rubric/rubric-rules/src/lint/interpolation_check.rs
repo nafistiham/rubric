@@ -58,6 +58,59 @@ impl Rule for InterpolationCheck {
                     continue;
                 }
 
+                // Skip percent literals: %r{...}, %w(...), %(string), etc.
+                if bytes[i] == b'%' && i + 1 < bytes.len() {
+                    let next = bytes[i + 1];
+                    let (delim_open, skip_to) = if matches!(next,
+                        b'r' | b'w' | b'W' | b'i' | b'I' | b's' | b'q' | b'Q' | b'x'
+                    ) && i + 2 < bytes.len() {
+                        (bytes[i + 2], i + 3)
+                    } else if matches!(next, b'(' | b'[' | b'{' | b'<') {
+                        (next, i + 2)
+                    } else {
+                        (0u8, 0)
+                    };
+                    if delim_open != 0 {
+                        let delim_close = match delim_open {
+                            b'(' => b')', b'[' => b']', b'{' => b'}', b'<' => b'>', d => d,
+                        };
+                        let paired = delim_open != delim_close;
+                        i = skip_to;
+                        let mut depth = 1usize;
+                        while i < bytes.len() && depth > 0 {
+                            if bytes[i] == b'\\' { i += 2; continue; }
+                            if paired {
+                                if bytes[i] == delim_open { depth += 1; }
+                                else if bytes[i] == delim_close { depth -= 1; }
+                            } else if bytes[i] == delim_close {
+                                depth -= 1;
+                            }
+                            i += 1;
+                        }
+                        continue;
+                    }
+                }
+
+                // Skip /regex/ literals (detect by preceding context)
+                if bytes[i] == b'/' {
+                    let prev_nonws = bytes[..i].iter().rposition(|&c| c != b' ' && c != b'\t')
+                        .map(|p| bytes[p]);
+                    if matches!(prev_nonws, None
+                        | Some(b'=') | Some(b'(') | Some(b',') | Some(b'[') | Some(b'!')
+                        | Some(b'|') | Some(b'&') | Some(b'?') | Some(b':') | Some(b';')
+                        | Some(b'~') | Some(b'{') | Some(b'>'))
+                        || prev_nonws.map_or(false, |c| c.is_ascii_alphabetic() || c == b'_')
+                    {
+                        i += 1;
+                        while i < bytes.len() {
+                            if bytes[i] == b'\\' { i += 2; continue; }
+                            if bytes[i] == b'/' { i += 1; break; }
+                            i += 1;
+                        }
+                        continue;
+                    }
+                }
+
                 // Look for a single-quoted string opening
                 if bytes[i] == b'\'' {
                     let open_pos = i;
