@@ -166,46 +166,111 @@ fn is_endless_method_def(t: &str) -> bool {
         }
     }
 
-    let rest = &t[4..];
-    let mut depth: i32 = 0;
+    // Endless method detection: `def [receiver.]name[?|!][=(setter)] [(params)] = expr`
+    // Strategy: skip receiver chain (e.g. `self.`), method name, optional paren
+    // param list, then check if the next non-space character is `=` (but not `==`/`=>`).
+    // This correctly handles default params like `def foo param = default` where
+    // the `=` is inside the param list, not the endless method `=`.
+    let rest = &t[4..]; // after "def "
     let bytes = rest.as_bytes();
     let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'(' => depth += 1,
-            b')' => { depth -= 1; }
-            b'=' if depth == 0 => {
-                let next = bytes.get(i + 1).copied().unwrap_or(0);
-                let prev = if i > 0 { bytes[i - 1] } else { 0 };
-                // Exclude compound/comparison operators: ==, =>, !=, <=, >=, +=, -=, etc.
-                if next == b'=' || next == b'>' {
-                    i += 1;
-                    continue;
-                }
-                if prev == b'!' || prev == b'<' || prev == b'>'
-                    || prev == b'=' || prev == b'+'
-                    || prev == b'-' || prev == b'*'
-                    || prev == b'/' || prev == b'%'
-                    || prev == b'|' || prev == b'&'
-                {
-                    i += 1;
-                    continue;
-                }
-                // Exclude setter method names like `def foo=(x)` where `=` immediately
-                // follows a word character (letter, digit, underscore, `?`, `!`).
-                // Endless def `=` must be preceded by space, tab, or `)`.
-                if prev != b' ' && prev != b'\t' && prev != b')' {
-                    i += 1;
-                    continue;
-                }
-                // `=` preceded by space or `)` and not part of a compound op: endless def
-                return true;
+
+    // Skip the method name (may be `receiver.name` chain, e.g. `self.foo`).
+    loop {
+        // Skip one identifier segment (alphanumeric + _)
+        while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+            i += 1;
+        }
+        // If followed by `.`, it's a receiver — consume the dot and continue.
+        if i < bytes.len() && bytes[i] == b'.' {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    // Skip optional `?` or `!` suffix on method name
+    if i < bytes.len() && (bytes[i] == b'?' || bytes[i] == b'!') {
+        i += 1;
+    }
+    // Skip setter `=` suffix (e.g. `def foo=(x)` — the `=` is part of the name,
+    // not the endless-method assignment `=`)
+    if i < bytes.len() && bytes[i] == b'=' {
+        let next = bytes.get(i + 1).copied().unwrap_or(0);
+        if next == b'(' || next == b' ' || next == b'\t' || next == 0 {
+            i += 1; // consume setter `=`; fall through to check for endless `=` after params
+        }
+    }
+
+    // Skip optional parenthesised parameter list
+    if i < bytes.len() && bytes[i] == b'(' {
+        let mut depth = 1i32;
+        i += 1;
+        while i < bytes.len() && depth > 0 {
+            match bytes[i] {
+                b'(' => depth += 1,
+                b')' => depth -= 1,
+                _ => {}
             }
-            _ => {}
+            i += 1;
+        }
+    }
+
+    // Skip whitespace
+    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+        i += 1;
+    }
+
+    // If the next char is `=` (but not `==` or `=>`), it's an endless method.
+    if i < bytes.len() && bytes[i] == b'=' {
+        let next = bytes.get(i + 1).copied().unwrap_or(0);
+        if next != b'=' && next != b'>' {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Strip a trailing `# inline comment` from `s`, respecting string and regex literals.
+/// Returns the code portion with trailing whitespace removed.
+fn strip_trailing_comment_ba(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    let n = bytes.len();
+    let mut in_str: Option<u8> = None;
+    let mut in_regex = false;
+    let mut i = 0;
+    while i < n {
+        let b = bytes[i];
+        if in_regex {
+            if b == b'\\' { i += 2; continue; }
+            if b == b'/' { in_regex = false; }
+            i += 1;
+            continue;
+        }
+        match in_str {
+            Some(_) if b == b'\\' => { i += 2; continue; }
+            Some(d) if b == d => { in_str = None; }
+            Some(_) => {}
+            None if b == b'"' || b == b'\'' => { in_str = Some(b); }
+            None if b == b'/' => {
+                // Heuristic: `/` starts a regex if preceded by `=`, `(`, `,`, etc.
+                let prev_nonws = bytes[..i].iter().rposition(|&c| c != b' ' && c != b'\t')
+                    .map(|p| bytes[p]);
+                if matches!(prev_nonws, None
+                    | Some(b'=') | Some(b'(') | Some(b',') | Some(b'[')
+                    | Some(b'!') | Some(b'|') | Some(b'&') | Some(b'?')
+                    | Some(b':') | Some(b';') | Some(b'~') | Some(b'{') | Some(b'>'))
+                    || prev_nonws.map_or(false, |c| c.is_ascii_alphabetic() || c == b'_')
+                {
+                    in_regex = true;
+                }
+            }
+            None if b == b'#' => return s[..i].trim_end(),
+            None => {}
         }
         i += 1;
     }
-    false
+    s.trim_end()
 }
 
 /// Extract the heredoc terminator word from a line (e.g. `<<~TERM` → `"TERM"`).
@@ -283,11 +348,29 @@ impl Rule for BlockAlignment {
 
             // ── What does this line open? ─────────────────────────────────
 
-            let opens_do_block = t.ends_with(" do")
-                || t.ends_with(" do |")
-                || t.contains(" do |")
-                || t.contains(" do|")
-                || t == "do";
+            // Strip inline comment for `do` detection (e.g. `foo do # comment`).
+            // Uses a string-aware stripper so `#` inside string literals is ignored.
+            let t_code = strip_trailing_comment_ba(t);
+
+            // One-liner `do...end` on the same line (e.g. `lambda do |_| x end`).
+            // These open and close within the same line — don't push to the stack.
+            let is_one_liner_do = {
+                let has_do = t_code.contains(" do ") || t_code.contains(" do|")
+                    || t_code.ends_with(" do");
+                let ends_end = t_code == "end"
+                    || t_code.ends_with(" end")
+                    || t_code.ends_with(";end")
+                    || t_code.ends_with("\tend");
+                has_do && ends_end
+            };
+
+            let opens_do_block = !is_one_liner_do && (
+                t_code.ends_with(" do")
+                || t_code.ends_with(" do |")
+                || t_code.contains(" do |")
+                || t_code.contains(" do|")
+                || t == "do"
+            );
 
             // Inner constructs that each require one matching `end`, but whose
             // alignment relative to the `end` is NOT checked here.
