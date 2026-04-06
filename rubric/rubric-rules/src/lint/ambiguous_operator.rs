@@ -61,6 +61,11 @@ impl Rule for AmbiguousOperator {
                 continue;
             }
 
+            // Method definitions: `def foo *args` / `def foo &blk` — never ambiguous
+            if trimmed.starts_with("def ") {
+                continue;
+            }
+
             let bytes = line.as_bytes();
 
             // Detect heredoc openers (body starts on next line)

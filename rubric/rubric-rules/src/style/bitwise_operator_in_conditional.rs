@@ -99,13 +99,15 @@ fn has_single_bitwise_operator(condition: &str) -> bool {
         }
 
         // Detect regex start: `/` preceded by `=`, `(`, `,`, `[`, `!`, `|`, `&`, `?`, `:`, `;`
+        // Also `~` covers the `=~` and `!~` operators (e.g. `msg =~ /pat|alt/`)
         if b == b'/' {
             let prev_nonws = bytes[..i].iter().rposition(|&c| c != b' ' && c != b'\t')
                 .map(|p| bytes[p]);
             if matches!(prev_nonws, None
                 | Some(b'=') | Some(b'(') | Some(b',') | Some(b'[')
                 | Some(b'!') | Some(b'|') | Some(b'&') | Some(b'?')
-                | Some(b':') | Some(b';') | Some(b'{') | Some(b'>')) {
+                | Some(b':') | Some(b';') | Some(b'{') | Some(b'>')
+                | Some(b'~')) {
                 in_regex = true;
                 i += 1;
                 continue;
