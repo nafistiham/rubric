@@ -4,6 +4,11 @@ pub struct EndAlignment;
 
 /// Returns true if `trimmed` is an endless method (`def foo = expr` / `def foo(x) = expr`).
 /// Endless methods never have a matching `end` and should not be pushed onto the stack.
+///
+/// Distinguishes from default parameter syntax (`def foo x, y = default`):
+/// - Endless: `def foo = expr` (no params) or `def foo(params) = expr` (all params in parens)
+/// - NOT endless: `def foo x, y = default` — the `=` is inside a non-paren param list
+///   (detected by `,` appearing at depth 0 before the `=`)
 fn is_endless_method(trimmed: &str) -> bool {
     let def_pos = match trimmed.find("def ") {
         Some(p) if p <= 20 => p, // "def " near start of trimmed line
@@ -13,13 +18,18 @@ fn is_endless_method(trimmed: &str) -> bool {
     let bytes = after_def.as_bytes();
     let n = bytes.len();
     let mut depth = 0i32;
+    let mut saw_comma_at_depth0 = false;
     let mut i = 0;
     while i < n {
         match bytes[i] {
             b'(' => { depth += 1; }
             b')' => { depth -= 1; }
-            // " = " at depth 0 (not "==" or "=>") indicates endless method
-            b' ' if depth == 0 && i + 2 < n
+            // Comma at depth 0 means we have non-parenthesized params (e.g. `def foo x, y`).
+            // An `=` after such a comma is a default value, not an endless-method `=`.
+            b',' if depth == 0 => { saw_comma_at_depth0 = true; }
+            // " = " at depth 0 (not "==" or "=>") indicates endless method —
+            // but only if we haven't seen a depth-0 comma (which would mean default params).
+            b' ' if depth == 0 && !saw_comma_at_depth0 && i + 2 < n
                 && bytes[i + 1] == b'='
                 && bytes[i + 2] != b'='
                 && bytes[i + 2] != b'>' => {
