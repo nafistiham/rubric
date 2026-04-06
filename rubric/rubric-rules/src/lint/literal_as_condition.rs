@@ -5,6 +5,29 @@ pub struct LiteralAsCondition;
 /// Keywords that introduce a condition followed by an expression.
 const CONDITION_KEYWORDS: &[&str] = &["if ", "unless ", "while ", "until "];
 
+/// Extract heredoc terminator word from a line (e.g. `<<TXT`, `<<~SQL`, `<<-'EOF'`).
+fn heredoc_terminator_word(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'<' && bytes[i + 1] == b'<' {
+            let rest = &line[i + 2..];
+            let rest = rest.strip_prefix('-').or_else(|| rest.strip_prefix('~')).unwrap_or(rest);
+            let rest = if rest.starts_with('"') || rest.starts_with('\'') || rest.starts_with('`') {
+                &rest[1..]
+            } else {
+                rest
+            };
+            let word: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            if !word.is_empty() {
+                return Some(word);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 /// Returns `Some(literal_str)` if `expr` starts with a literal value, or `None`.
 ///
 /// Recognised literals:
@@ -93,40 +116,28 @@ impl Rule for LiteralAsCondition {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
-        let mut in_heredoc = false;
+        let mut in_heredoc: Option<String> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
-            let trimmed = line.trim_start();
+            // Skip heredoc body lines
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim() == term.as_str() {
+                    in_heredoc = None;
+                }
+                continue;
+            }
 
-            // Heredoc body skip (simple: detect <<HEREDOC and skip until we see the marker)
-            // For simplicity, skip heredoc tracking; focus on comment/condition detection.
+            // Detect heredoc opening — body starts on NEXT line
+            if let Some(term) = heredoc_terminator_word(line) {
+                in_heredoc = Some(term);
+                // Fall through: still check the opener line itself
+            }
+
+            let trimmed = line.trim_start();
 
             // Skip comment lines
             if trimmed.starts_with('#') {
                 continue;
-            }
-
-            // Skip heredoc body lines (basic detection)
-            if in_heredoc {
-                // A bare identifier line at column 0 ends the heredoc
-                if !trimmed.is_empty() && trimmed.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                    in_heredoc = false;
-                }
-                continue;
-            }
-
-            // Detect heredoc opening
-            if line.contains("<<~") || line.contains("<<-") || line.contains("<<'") || line.contains("<<\"") {
-                in_heredoc = true;
-                // Still check the current line for conditions before the heredoc
-            } else if line.contains("<<") && !line.contains("<<= ") && !line.contains("<<=") {
-                // Simple `<<IDENTIFIER` heredoc
-                if let Some(pos) = line.find("<<") {
-                    let rest = &line[pos + 2..];
-                    if rest.chars().next().map(|c| c.is_ascii_alphabetic() || c == '_').unwrap_or(false) {
-                        in_heredoc = true;
-                    }
-                }
             }
 
             let line_start = ctx.line_start_offsets[i] as u32;
@@ -135,6 +146,12 @@ impl Rule for LiteralAsCondition {
                 if trimmed.starts_with(kw) {
                     let condition_expr = &trimmed[kw.len()..];
                     if let Some(literal) = extract_leading_literal(condition_expr) {
+                        // Skip if the literal is used as a receiver (followed by `.`)
+                        // e.g. `if 5.class.name == 'Integer'` — `5` is a receiver, not the condition
+                        let after_literal = condition_expr[literal.len()..].trim_start();
+                        if after_literal.starts_with('.') {
+                            break;
+                        }
                         let line_end = line_start + line.len() as u32;
                         diags.push(Diagnostic {
                             rule: self.name(),
