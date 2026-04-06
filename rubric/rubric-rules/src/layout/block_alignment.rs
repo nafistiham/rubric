@@ -306,20 +306,34 @@ impl Rule for BlockAlignment {
                     || t.starts_with("unless ")
                     || t.starts_with("while ")
                     || t.starts_with("until ")
-                    || t.starts_with("class ")
-                    || t.starts_with("module ")
+                    // Single-line `class Foo; end` / `module Foo; end` do NOT produce a standalone
+                    // `end` line — skip them to avoid consuming an unrelated `end` from the stack.
+                    || (t.starts_with("class ") && !t.contains(';'))
+                    || (t.starts_with("module ") && !t.contains(';'))
             );
 
             // Inline conditional on a shovel/assignment that is not a do-block or inner construct.
             // Patterns: `x << if`, `x = if`, `x += if`, `x ||= if`, etc.
+            // NOTE: avoid matching `undef foo= if ...` where `=` is part of a setter method name.
+            // We require either ` = if ` (space before =, plain assignment) or a compound
+            // operator suffix before `= if ` (i.e. the char before `=` is `+`,`-`,`|`,`&`,etc.).
             let has_inline_conditional = !opens_do_block && !opens_inner_construct && (
                 t.contains(" << if ")
                     || t.contains(" << unless ")
                     || t.contains(" << case ")
                     || t.contains(" = if ")
                     || t.contains(" = unless ")
-                    || t.contains("= if ")    // catches `+=`, `||=`, `&&=`, etc.
-                    || t.contains("= unless ")
+                    // Compound operators: `+=`, `-=`, `*=`, `/=`, `||=`, `&&=`, `**=`, `%=`, `^=`
+                    || t.contains("+= if ")
+                    || t.contains("-= if ")
+                    || t.contains("*= if ")
+                    || t.contains("/= if ")
+                    || t.contains("||= if ")
+                    || t.contains("&&= if ")
+                    || t.contains("**= if ")
+                    || t.contains("+= unless ")
+                    || t.contains("-= unless ")
+                    || t.contains("||= unless ")
             );
 
             if opens_do_block {
