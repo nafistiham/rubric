@@ -5,10 +5,12 @@ pub struct EndAlignment;
 /// Returns true if `trimmed` is an endless method (`def foo = expr` / `def foo(x) = expr`).
 /// Endless methods never have a matching `end` and should not be pushed onto the stack.
 ///
-/// Distinguishes from default parameter syntax (`def foo x, y = default`):
-/// - Endless: `def foo = expr` (no params) or `def foo(params) = expr` (all params in parens)
-/// - NOT endless: `def foo x, y = default` — the `=` is inside a non-paren param list
-///   (detected by `,` appearing at depth 0 before the `=`)
+/// Two forms of endless methods:
+/// 1. No params: `def foo = expr` — `=` immediately follows method name (no other tokens)
+/// 2. Parenthesized params: `def foo(x, y = nil) = expr` — `=` follows closing `)` at depth 0
+///
+/// NOT endless: `def foo x = default` or `def foo x, y = default` — unparenthesized params.
+/// Detected by scanning: if there's no `(`, skip the method name, and check if ` = ` is next.
 fn is_endless_method(trimmed: &str) -> bool {
     let def_pos = match trimmed.find("def ") {
         Some(p) if p <= 20 => p, // "def " near start of trimmed line
@@ -17,29 +19,63 @@ fn is_endless_method(trimmed: &str) -> bool {
     let after_def = &trimmed[def_pos + 4..]; // skip "def "
     let bytes = after_def.as_bytes();
     let n = bytes.len();
-    let mut depth = 0i32;
-    let mut saw_comma_at_depth0 = false;
+
+    // Skip optional receiver (e.g. `self`, `opts`, `sw`) — just alphanumeric + `_`
     let mut i = 0;
-    while i < n {
-        match bytes[i] {
-            b'(' => { depth += 1; }
-            b')' => { depth -= 1; }
-            // Comma at depth 0 means we have non-parenthesized params (e.g. `def foo x, y`).
-            // An `=` after such a comma is a default value, not an endless-method `=`.
-            b',' if depth == 0 => { saw_comma_at_depth0 = true; }
-            // " = " at depth 0 (not "==" or "=>") indicates endless method —
-            // but only if we haven't seen a depth-0 comma (which would mean default params).
-            b' ' if depth == 0 && !saw_comma_at_depth0 && i + 2 < n
-                && bytes[i + 1] == b'='
-                && bytes[i + 2] != b'='
-                && bytes[i + 2] != b'>' => {
-                return true;
-            }
-            _ => {}
-        }
+    while i < n && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
         i += 1;
     }
-    false
+    // If followed by `.`, this was a receiver — skip the dot and scan the method name proper
+    if i < n && bytes[i] == b'.' {
+        i += 1;
+        while i < n && (bytes[i].is_ascii_alphanumeric() || matches!(bytes[i], b'_' | b'!' | b'?' | b'=' | b'[' | b']')) {
+            i += 1;
+        }
+    } else {
+        // No receiver — finish skipping remaining method-name chars (`!`, `?`, `=`, `[]`)
+        while i < n && matches!(bytes[i], b'!' | b'?' | b'=' | b'[' | b']') {
+            i += 1;
+        }
+    }
+
+    if i >= n {
+        return false; // just a method name, no body
+    }
+
+    match bytes[i] {
+        b'(' => {
+            // Parenthesized params: scan to the matching ')' then check for ' = '
+            let mut depth = 0i32;
+            while i < n {
+                match bytes[i] {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            // After closing `)`, skip whitespace then check for `=` (not `==` or `=>`)
+            while i < n && bytes[i] == b' ' { i += 1; }
+            i < n && bytes[i] == b'='
+                && (i + 1 >= n || (bytes[i + 1] != b'=' && bytes[i + 1] != b'>'))
+        }
+        b' ' => {
+            // No parens after method name — check if ` = ` immediately follows
+            // (endless form `def foo = expr`), vs `def foo x = default` (NOT endless)
+            let rest = &after_def[i + 1..];
+            // Must start with `=` (not `==` or `=>`) with no identifier tokens before it
+            rest.starts_with("= ")
+                || rest.starts_with("=\t")
+                || (rest.len() == 1 && rest == "=")
+        }
+        _ => false,
+    }
 }
 
 /// Returns true if `trimmed` is a one-liner — its opener and closer are on the same line.
@@ -195,13 +231,15 @@ fn has_inline_block_opener(trimmed: &str) -> bool {
             return true;
         }
     }
-    // `<< if`, `<< unless`, `<< case`, `<< begin`
+    // `<< if`, `<< unless`, `<< case`, `<< begin` (with one or more spaces)
     for kw in &["if", "unless", "case", "begin"] {
-        let needle = format!("<< {}", kw);
-        if let Some(pos) = trimmed.find(&needle) {
-            let after = &trimmed[pos + needle.len()..];
-            if after.is_empty() || after.starts_with(' ') {
-                return true;
+        if let Some(pos) = trimmed.find("<<") {
+            let after_op = trimmed[pos + 2..].trim_start();
+            if after_op.starts_with(kw) {
+                let rest = &after_op[kw.len()..];
+                if rest.is_empty() || rest.starts_with(' ') || rest.starts_with('\t') || rest.starts_with('#') {
+                    return true;
+                }
             }
         }
     }

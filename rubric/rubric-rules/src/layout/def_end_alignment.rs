@@ -52,47 +52,61 @@ fn is_endless_method(trimmed: &str) -> bool {
         Some(p) if p <= 20 => p,
         _ => return false,
     };
-    let after_def = &trimmed[def_pos + 4..];
+    let after_def = &trimmed[def_pos + 4..]; // skip "def "
     let bytes = after_def.as_bytes();
     let n = bytes.len();
-    let mut depth = 0i32;
-    let mut seen_comma_at_depth0 = false;
-    // Set when we see a space at depth=0 followed by a non-`=` non-`(` character,
-    // which means we've entered unparenthesized parameter territory.
-    let mut seen_param_at_depth0 = false;
+
+    // Skip optional receiver (e.g. `self`, `opts`, `sw`) — just alphanumeric + `_`
     let mut i = 0;
-    while i < n {
-        match bytes[i] {
-            b'(' => { depth += 1; }
-            b')' => {
-                depth -= 1;
-                // After closing the outermost paren, reset trackers —
-                // what matters now is whether there's a ` = ` AFTER the `)`.
-                if depth == 0 {
-                    seen_comma_at_depth0 = false;
-                    seen_param_at_depth0 = false;
-                }
-            }
-            b',' if depth == 0 => { seen_comma_at_depth0 = true; }
-            b' ' if depth == 0 && !seen_comma_at_depth0 && !seen_param_at_depth0
-                && i + 2 < n
-                && bytes[i + 1] == b'='
-                && bytes[i + 2] != b'='
-                && bytes[i + 2] != b'>' => {
-                return true;
-            }
-            b' ' if depth == 0 => {
-                // Space at depth=0 where the next char is not `=` or `(` indicates
-                // we've moved past the method name into parameter territory.
-                if i + 1 < n && bytes[i + 1] != b'=' && bytes[i + 1] != b'(' {
-                    seen_param_at_depth0 = true;
-                }
-            }
-            _ => {}
-        }
+    while i < n && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
         i += 1;
     }
-    false
+    // If followed by `.`, this was a receiver — skip the dot and scan the method name proper
+    if i < n && bytes[i] == b'.' {
+        i += 1;
+        while i < n && (bytes[i].is_ascii_alphanumeric() || matches!(bytes[i], b'_' | b'!' | b'?' | b'=' | b'[' | b']')) {
+            i += 1;
+        }
+    } else {
+        // No receiver — finish skipping remaining method-name chars (`!`, `?`, `=`, `[]`)
+        while i < n && matches!(bytes[i], b'!' | b'?' | b'=' | b'[' | b']') {
+            i += 1;
+        }
+    }
+
+    if i >= n {
+        return false;
+    }
+
+    match bytes[i] {
+        b'(' => {
+            // Parenthesized params: scan to the matching ')' then check for `=`
+            let mut depth = 0i32;
+            while i < n {
+                match bytes[i] {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 { i += 1; break; }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            // Skip whitespace then check for `=` (not `==` or `=>`)
+            while i < n && bytes[i] == b' ' { i += 1; }
+            i < n && bytes[i] == b'='
+                && (i + 1 >= n || (bytes[i + 1] != b'=' && bytes[i + 1] != b'>'))
+        }
+        b' ' => {
+            // No parens — check if ` = ` immediately follows (endless `def foo = expr`)
+            let rest = &after_def[i + 1..];
+            rest.starts_with("= ")
+                || rest.starts_with("=\t")
+                || (rest.len() == 1 && rest == "=")
+        }
+        _ => false,
+    }
 }
 
 /// If `bytes[i]` is `/` that starts a regex literal, returns the byte offset
