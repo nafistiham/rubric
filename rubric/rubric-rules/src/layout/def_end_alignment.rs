@@ -397,21 +397,29 @@ fn has_unquoted_do_with_params(t: &str) -> bool {
 }
 
 /// Returns true if the line contains `= KEYWORD ` or ends with `= KEYWORD`,
-/// but only when the `=` is NOT immediately preceded by `]`.
-/// The `]` exclusion prevents the `[]=` operator name (as in
-/// `alias_method :x, :[]= unless method_defined?(:x)`) from being treated as
-/// an inline conditional assignment.
+/// but only when the `=` is an assignment operator — NOT part of a method name
+/// like `extra_params=` or `[]=`.
+/// Exclusions:
+///   - `=` preceded by `]` → `[]=` operator name
+///   - `=` preceded by alphanumeric or `_` → setter method name (e.g. `method= if`)
 fn eq_keyword(t: &str, keyword: &str) -> bool {
     let bytes = t.as_bytes();
     let n = bytes.len();
     let pat_space = format!("= {} ", keyword);
     let pat_end   = format!("= {}", keyword);
     for (i, _) in t.match_indices(&*pat_space) {
-        if i == 0 || bytes[i - 1] != b']' { return true; }
+        if i == 0 { return true; }
+        let prev = bytes[i - 1];
+        // Skip if `=` is part of a method name (setter) or `[]=` operator
+        if prev == b']' || prev.is_ascii_alphanumeric() || prev == b'_' { continue; }
+        return true;
     }
     if t.ends_with(&*pat_end) {
         let i = n - pat_end.len();
-        if i == 0 || bytes[i - 1] != b']' { return true; }
+        if i == 0 { return true; }
+        let prev = bytes[i - 1];
+        if prev == b']' || prev.is_ascii_alphanumeric() || prev == b'_' { return false; }
+        return true;
     }
     false
 }

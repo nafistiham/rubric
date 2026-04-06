@@ -270,7 +270,12 @@ fn contains_assign_kw(trimmed: &str, kw: &str) -> bool {
 
     let mut i = 0;
     while i < n {
-        if bytes[i] == b'=' && (i == 0 || (bytes[i - 1] != b'!' && bytes[i - 1] != b'<' && bytes[i - 1] != b'>' && bytes[i - 1] != b']')) {
+        if bytes[i] == b'=' && (i == 0 || {
+            let prev = bytes[i - 1];
+            // Exclude: `!=`, `<=`, `>=`, `[]=` (operators), and setter method names like `method=`
+            prev != b'!' && prev != b'<' && prev != b'>' && prev != b']'
+                && !prev.is_ascii_alphanumeric() && prev != b'_'
+        }) {
             // Skip past optional `=` in `==`, `=>`, `=~`
             if i + 1 < n && (bytes[i + 1] == b'=' || bytes[i + 1] == b'>' || bytes[i + 1] == b'~') {
                 i += 1;
