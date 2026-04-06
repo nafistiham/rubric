@@ -2,6 +2,29 @@ use rubric_core::{Diagnostic, LintContext, Rule, Severity, TextRange};
 
 pub struct PerlBackrefs;
 
+/// Extract heredoc terminator from a line (`<<WORD`, `<<-WORD`, `<<~WORD`).
+fn heredoc_terminator(line: &str) -> Option<String> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'<' && bytes[i + 1] == b'<' {
+            let rest = &line[i + 2..];
+            let rest = rest.strip_prefix('-').or_else(|| rest.strip_prefix('~')).unwrap_or(rest);
+            let rest = if rest.starts_with('"') || rest.starts_with('\'') || rest.starts_with('`') {
+                &rest[1..]
+            } else {
+                rest
+            };
+            let word: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            if !word.is_empty() {
+                return Some(word);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 impl Rule for PerlBackrefs {
     fn name(&self) -> &'static str {
         "Style/PerlBackrefs"
@@ -9,8 +32,24 @@ impl Rule for PerlBackrefs {
 
     fn check_source(&self, ctx: &LintContext) -> Vec<Diagnostic> {
         let mut diags = Vec::new();
+        // Track heredoc bodies — `$N` inside SQL/shell heredocs is not a Perl backref.
+        let mut in_heredoc: Option<String> = None;
 
         for (i, line) in ctx.lines.iter().enumerate() {
+            // Skip heredoc body lines (including the terminator line itself).
+            if let Some(ref term) = in_heredoc.clone() {
+                if line.trim() == term.as_str() {
+                    in_heredoc = None;
+                }
+                continue;
+            }
+
+            // Detect heredoc opener — body starts on the next line.
+            if let Some(term) = heredoc_terminator(line) {
+                in_heredoc = Some(term);
+                // Fall through: still check the opener line itself for `$N` in Ruby code.
+            }
+
             let trimmed = line.trim_start();
             if trimmed.starts_with('#') {
                 continue;

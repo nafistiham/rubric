@@ -55,6 +55,35 @@ impl Rule for DateTime {
                     || (!bytes[after].is_ascii_alphanumeric() && bytes[after] != b'_');
 
                 if before_ok && after_ok && !in_string_at(bytes, abs) {
+                    // RuboCop only flags specific class methods: `.now`, `.current`,
+                    // `.yesterday`, `.tomorrow`. `DateTime.new(...)` and other usage is
+                    // NOT flagged.  Check that the word is followed by `.method_name`
+                    // where the method is one of the bad ones.
+                    let after_dt = abs + needle.len();
+                    let rest = &code_slice[after_dt..];
+                    let bad = rest.starts_with(".now")
+                        || rest.starts_with(".current")
+                        || rest.starts_with(".yesterday")
+                        || rest.starts_with(".tomorrow");
+                    if !bad {
+                        search = after_dt;
+                        continue;
+                    }
+                    // Verify the method name is followed by word-boundary (not e.g. .now_or_something)
+                    let method_len = if rest.starts_with(".now") { 4 }
+                        else if rest.starts_with(".current") { 8 }
+                        else if rest.starts_with(".yesterday") { 10 }
+                        else { 9 }; // .tomorrow
+                    let after_method = after_dt + method_len;
+                    let method_boundary = after_method >= code_slice.len()
+                        || {
+                            let c = code_slice.as_bytes()[after_method];
+                            !c.is_ascii_alphanumeric() && c != b'_'
+                        };
+                    if !method_boundary {
+                        search = after_method;
+                        continue;
+                    }
                     let line_start = ctx.line_start_offsets[i] as usize;
                     let start = (line_start + abs) as u32;
                     let end = start + needle.len() as u32;
