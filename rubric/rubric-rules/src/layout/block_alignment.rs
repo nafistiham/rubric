@@ -350,6 +350,11 @@ impl Rule for BlockAlignment {
                 continue;
             }
 
+            // Skip ERB template lines (`<% code %>`) — not pure Ruby
+            if trimmed.starts_with("<%") {
+                continue;
+            }
+
             let t = trimmed.trim();
 
             // ── What does this line open? ─────────────────────────────────
