@@ -354,6 +354,22 @@ impl Rule for SpaceAroundOperators {
                     None => {}
                 }
 
+                // ── Early regex-opener detection ──────────────────────────────
+                // Must happen before the two-char `/=` check: `/=>`, `/=~`, `/==`
+                // inside a regex literal (e.g. `match(/=> 2/)`) look like the `/=`
+                // division-assign operator to a naive two-char scanner.
+                if b == b'/' {
+                    let prev = if j > 0 { bytes[j-1] } else { 0 };
+                    if prev == b'=' || prev == b'(' || prev == b',' || prev == b'['
+                        || prev == b' ' || prev == b'\t' || prev == 0
+                        || prev == b'!' || prev == b':'
+                    {
+                        in_regex = true;
+                        j += 1;
+                        continue;
+                    }
+                }
+
                 // ── 3-char compound operators: ||=, &&=, ===, <=> ────────────
                 if j + 2 < len {
                     let three = &bytes[j..j+3];
