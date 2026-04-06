@@ -97,39 +97,51 @@ impl Rule for ImplicitStringConcatenation {
                     }
                     None if b == b'#' => break,
                     None => {
-                        // Detect %r{...}, %w(...), %i{...}, etc. percent literals — skip them so
-                        // slashes and quoted chars inside don't confuse string/regex tracking.
-                        if b == b'%' && pos + 2 < n
-                            && matches!(bytes[pos + 1], b'r' | b'w' | b'W' | b'i' | b'I' | b's')
-                        {
-                            let delim_open = bytes[pos + 2];
-                            let delim_close = match delim_open {
-                                b'(' => b')',
-                                b'[' => b']',
-                                b'{' => b'}',
-                                b'<' => b'>',
-                                d => d,
+                        // Detect percent literals: %w(...), %r{...}, %(string), %q(), etc.
+                        // Skip them so quoted chars inside don't confuse string tracking.
+                        if b == b'%' && pos + 1 < n {
+                            let next = bytes[pos + 1];
+                            // Determine opening delimiter and start position
+                            let (delim_open, skip_to) = if matches!(next,
+                                b'r' | b'w' | b'W' | b'i' | b'I' | b's' | b'q' | b'Q' | b'x'
+                            ) && pos + 2 < n {
+                                (bytes[pos + 2], pos + 3)
+                            } else if matches!(next, b'(' | b'[' | b'{' | b'<' | b'|' | b'!') {
+                                // Bare %(...) — a string literal
+                                (next, pos + 2)
+                            } else {
+                                (0u8, 0)
                             };
-                            let paired = delim_open != delim_close;
-                            pos += 3; // skip `%r` + opening delimiter
-                            let mut depth = 1usize;
-                            while pos < n {
-                                let c = bytes[pos];
-                                if c == b'\\' { pos += 2; continue; }
-                                if paired {
-                                    if c == delim_open { depth += 1; }
-                                    else if c == delim_close {
-                                        depth -= 1;
-                                        if depth == 0 { pos += 1; break; }
+
+                            if delim_open != 0 {
+                                let delim_close = match delim_open {
+                                    b'(' => b')',
+                                    b'[' => b']',
+                                    b'{' => b'}',
+                                    b'<' => b'>',
+                                    d => d,
+                                };
+                                let paired = delim_open != delim_close;
+                                pos = skip_to;
+                                let mut depth = 1usize;
+                                while pos < n {
+                                    let c = bytes[pos];
+                                    if c == b'\\' { pos += 2; continue; }
+                                    if paired {
+                                        if c == delim_open { depth += 1; }
+                                        else if c == delim_close {
+                                            depth -= 1;
+                                            if depth == 0 { pos += 1; break; }
+                                        }
+                                    } else if c == delim_close {
+                                        pos += 1;
+                                        break;
                                     }
-                                } else if c == delim_close {
                                     pos += 1;
-                                    break;
                                 }
-                                pos += 1;
+                                string_ended_at = None;
+                                continue;
                             }
-                            string_ended_at = None;
-                            continue;
                         }
                         string_ended_at = None;
                         pos += 1;
