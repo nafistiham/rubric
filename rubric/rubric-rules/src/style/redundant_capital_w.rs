@@ -57,8 +57,27 @@ impl Rule for RedundantCapitalW {
 
                     let content = &src[content_start..j];
 
-                    // Flag only if no interpolation present
-                    if !content.contains("#{") {
+                    // Flag only if no interpolation AND no escape sequences.
+                    // `%W` supports escape sequences like `\n`, `\t`, etc. that `%w` does not.
+                    // If the content has any `\X` (non-`\\`), `%W` is required.
+                    let has_escape = {
+                        let cb = content.as_bytes();
+                        let mut k = 0;
+                        let mut found = false;
+                        while k + 1 < cb.len() {
+                            if cb[k] == b'\\' {
+                                if cb[k + 1] != b'\\' {
+                                    found = true;
+                                    break;
+                                }
+                                k += 2;
+                                continue;
+                            }
+                            k += 1;
+                        }
+                        found
+                    };
+                    if !content.contains("#{") && !has_escape {
                         // Find the line number for this position to get line_start_offset
                         let start = i as u32;
                         let end = (j + 1) as u32;

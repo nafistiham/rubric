@@ -13,11 +13,17 @@ fn ends_with_operator(line: &str) -> bool {
             // Check that op is preceded by a space or alphanumeric
             let without_op = &trimmed[..trimmed.len() - op.len()];
             if without_op.is_empty() || without_op.ends_with(' ') || without_op.ends_with(|c: char| c.is_ascii_alphanumeric()) {
-                // Extra guard for `/`: if the slash count in the line is even and >= 2,
-                // the trailing `/` closes a regex literal rather than being a division
-                // operator. Skip flagging this line as a continuation.
-                if *op == "/" && slash_count_is_even_and_paired(trimmed) {
-                    return false;
+                if *op == "/" {
+                    // If the line uses a regex-match operator (`=~` / `!~`) and ends with `/`,
+                    // the trailing slash closes a regex literal, not a division operator.
+                    if trimmed.contains("=~") || trimmed.contains("!~") {
+                        return false;
+                    }
+                    // If there are an even number of code-level slashes (>= 2), the trailing
+                    // `/` closes a regex literal rather than being a division operator.
+                    if slash_count_is_even_and_paired(trimmed) {
+                        return false;
+                    }
                 }
                 return true;
             }
@@ -185,13 +191,17 @@ impl Rule for MultilineOperationIndentation {
 
                 let next_indent = next_line.len() - next_trimmed.len();
 
-                if next_indent != expected_indent {
+                // RuboCop's default style is `aligned` — continuation lines may be
+                // indented to any level >= the operator line's base indentation.
+                // Only flag when the continuation is *dedented* below that base, which
+                // is unambiguously wrong regardless of style preference.
+                if next_indent < base_indent {
                     let line_start = ctx.line_start_offsets[i + 1];
                     diags.push(Diagnostic {
                         rule: self.name(),
                         message: format!(
-                            "Continuation line indentation ({}) should be {} (current + 2).",
-                            next_indent, expected_indent
+                            "Continuation line indentation ({}) should be at least {} (operator line indentation).",
+                            next_indent, base_indent
                         ),
                         range: TextRange::new(line_start, line_start + next_indent as u32),
                         severity: Severity::Warning,
