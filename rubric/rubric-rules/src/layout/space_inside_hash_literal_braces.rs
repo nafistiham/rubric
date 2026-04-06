@@ -36,6 +36,9 @@ impl Rule for SpaceInsideHashLiteralBraces {
         // Tracks same-char delimiter multiline percent literals (e.g. %r!...!, %r|...|)
         let mut in_same_char_percent: Option<u8> = None;
         let mut in_heredoc: Option<String> = None;
+        // Cross-line block tracking: when a block `{ ... }` spans multiple lines,
+        // track its brace depth so the closing `}` is not mistakenly flagged as hash.
+        let mut in_multiline_block_depth: i32 = 0;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             let bytes = line.as_bytes();
@@ -106,6 +109,29 @@ impl Rule for SpaceInsideHashLiteralBraces {
             let mut j = 0;
             while j < len {
                 let b = bytes[j];
+
+                // If we're inside a multiline block, track depth changes but don't flag braces
+                if in_multiline_block_depth > 0 {
+                    match b {
+                        b'\\' => { j += 2; continue; }
+                        b'"' | b'\'' => {
+                            let q = b; j += 1;
+                            while j < len {
+                                if bytes[j] == b'\\' { j += 2; continue; }
+                                if bytes[j] == q { j += 1; break; }
+                                j += 1;
+                            }
+                            continue;
+                        }
+                        b'{' => { in_multiline_block_depth += 1; j += 1; continue; }
+                        b'}' => {
+                            in_multiline_block_depth -= 1;
+                            j += 1;
+                            continue;
+                        }
+                        _ => { j += 1; continue; }
+                    }
+                }
 
                 match in_string {
                     Some(_) if b == b'\\' => { j += 2; continue; }
@@ -203,10 +229,16 @@ impl Rule for SpaceInsideHashLiteralBraces {
                         j += 2;
                         continue;
                     }
-                    // Skip block braces {|params| body} — these are blocks, not hash literals
-                    if next == b'|' {
+                    // Next non-whitespace character — used to detect `{ |params|` blocks
+                    let next_nonws = {
+                        let mut k = j + 1;
+                        while k < len && (bytes[k] == b' ' || bytes[k] == b'\t') { k += 1; }
+                        if k < len { bytes[k] } else { 0 }
+                    };
+                    // Skip block braces {|params| body} or { |params| body } — blocks, not hashes
+                    if next == b'|' || next_nonws == b'|' {
                         j += 1; // past `{`
-                        let mut depth = 1usize;
+                        let mut depth = 1i32;
                         while j < len && depth > 0 {
                             match bytes[j] {
                                 b'\\' => { j += 2; }
@@ -214,6 +246,10 @@ impl Rule for SpaceInsideHashLiteralBraces {
                                 b'}' => { depth -= 1; j += 1; }
                                 _ => { j += 1; }
                             }
+                        }
+                        if depth > 0 {
+                            // Multiline block: track remaining depth across lines
+                            in_multiline_block_depth = depth;
                         }
                         continue;
                     }
@@ -231,7 +267,7 @@ impl Rule for SpaceInsideHashLiteralBraces {
                         || matches!(prev_nonws, b')' | b']')
                     {
                         j += 1; // past `{`; skip the whole block
-                        let mut depth = 1usize;
+                        let mut depth = 1i32;
                         while j < len && depth > 0 {
                             match bytes[j] {
                                 b'\\' => { j += 2; }
@@ -243,6 +279,10 @@ impl Rule for SpaceInsideHashLiteralBraces {
                                 b'}' => { depth -= 1; j += 1; }
                                 _ => { j += 1; }
                             }
+                        }
+                        if depth > 0 {
+                            // Multiline block: track remaining depth across lines
+                            in_multiline_block_depth = depth;
                         }
                         continue;
                     }
