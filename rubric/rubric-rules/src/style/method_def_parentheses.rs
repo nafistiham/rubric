@@ -42,9 +42,9 @@ impl Rule for MethodDefParentheses {
                 continue;
             }
 
-            // Extract the method name — it's everything up to `(`, ` `, or end of token
+            // Extract the method name — it's everything up to `(`, ` `, `;`, or end of token
             let name_end = after_def
-                .find(|c: char| c == '(' || c == ' ' || c == '\t' || c == '\n')
+                .find(|c: char| c == '(' || c == ' ' || c == '\t' || c == '\n' || c == ';')
                 .unwrap_or(after_def.len());
             let method_name = &after_def[..name_end];
 
@@ -90,6 +90,7 @@ impl Rule for MethodDefParentheses {
                 if !trimmed_rest.is_empty()
                     && !trimmed_rest.starts_with('#')
                     && !trimmed_rest.starts_with('\n')
+                    && !trimmed_rest.starts_with(';')  // inline body, not params
                 {
                     // There's something after the method name — those are params without parens
                     diags.push(Diagnostic {
