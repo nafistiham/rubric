@@ -40,40 +40,65 @@ enum FrameKind {
 }
 
 /// Returns `true` when the trimmed line is an endless method definition,
-/// i.e. `def name = expr` or `def name(params) = expr`.
+/// i.e. `def name = expr`, `def name(params) = expr`, or
+/// `def receiver.name(params) = expr`.
 ///
-/// Detection strategy: find `def ` at or near the start of the trimmed line,
-/// then scan the remainder for a bare ` = ` (not `==`, not `=>`) at
-/// parenthesis depth 0.
+/// Uses a proper method-signature parser to avoid false positives on
+/// methods with default parameters like `def foo x = nil` (not endless).
 fn is_endless_method(t: &str) -> bool {
     let def_pos = match t.find("def ") {
-        // Allow `def ` to appear at position 0–20 (leading spaces already
-        // stripped by the caller; small cap is a safety guard).
         Some(p) if p <= 20 => p,
         _ => return false,
     };
-    let after = &t[def_pos + 4..];
-    let bytes = after.as_bytes();
-    let mut depth: i32 = 0;
+    let after_def = &t[def_pos + 4..];
+    let bytes = after_def.as_bytes();
+    let n = bytes.len();
+
+    // Skip optional receiver (e.g. `self`, `opts`) — just alphanumeric + `_`
     let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'(' => depth += 1,
-            b')' => depth -= 1,
-            b' ' if depth == 0
-                && i + 2 < bytes.len()
-                && bytes[i + 1] == b'='
-                // Must not be `==` or `=>`
-                && bytes[i + 2] != b'='
-                && bytes[i + 2] != b'>' =>
-            {
-                return true;
-            }
-            _ => {}
-        }
+    while i < n && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
         i += 1;
     }
-    false
+    // If followed by `.`, this was a receiver — skip dot and scan method name
+    if i < n && bytes[i] == b'.' {
+        i += 1;
+        while i < n && (bytes[i].is_ascii_alphanumeric() || matches!(bytes[i], b'_' | b'!' | b'?' | b'=' | b'[' | b']')) {
+            i += 1;
+        }
+    } else {
+        // No receiver — finish skipping remaining method-name chars
+        while i < n && matches!(bytes[i], b'!' | b'?' | b'=' | b'[' | b']') {
+            i += 1;
+        }
+    }
+
+    if i >= n { return false; }
+
+    match bytes[i] {
+        b'(' => {
+            // Parenthesized params: scan to matching ')' then check for `=`
+            let mut depth = 0i32;
+            while i < n {
+                match bytes[i] {
+                    b'(' => depth += 1,
+                    b')' => { depth -= 1; if depth == 0 { i += 1; break; } }
+                    _ => {}
+                }
+                i += 1;
+            }
+            while i < n && bytes[i] == b' ' { i += 1; }
+            i < n && bytes[i] == b'='
+                && (i + 1 >= n || (bytes[i + 1] != b'=' && bytes[i + 1] != b'>'))
+        }
+        b' ' => {
+            // No parens — `def foo = expr` only if ` = ` immediately follows
+            let rest = &after_def[i + 1..];
+            rest.starts_with("= ")
+                || rest.starts_with("=\t")
+                || (rest.len() == 1 && rest == "=")
+        }
+        _ => false,
+    }
 }
 
 /// Returns `true` when the trimmed line is a single-line method definition that
@@ -247,35 +272,39 @@ fn opens_other_block(t: &str) -> bool {
 /// or `<<~`.  Quoted heredocs (e.g. `<<"WORD"` or `<<'WORD'`) are also
 /// handled by stripping the surrounding quote characters.
 fn heredoc_terminator(line: &str) -> Option<String> {
-    // Find `<<` in the line.
-    let pos = line.find("<<")?;
-    let rest = &line[pos + 2..];
-
-    // Strip optional `-` or `~` sigil.
-    let rest = rest.strip_prefix('-').unwrap_or(rest);
-    let rest = rest.strip_prefix('~').unwrap_or(rest);
-
-    // Strip optional surrounding quotes.
-    let rest = if (rest.starts_with('"') && rest.contains('"'))
-        || (rest.starts_with('\'') && rest.contains('\''))
-        || (rest.starts_with('`') && rest.contains('`'))
-    {
-        &rest[1..]
-    } else {
-        rest
-    };
-
-    // Collect the identifier (letters, digits, underscores).
-    let word: String = rest
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect();
-
-    if word.is_empty() {
-        None
-    } else {
-        Some(word)
+    // Scan all `<<` occurrences in the line and return the first one that
+    // looks like a heredoc opener (has an identifier after optional `-`/`~`).
+    // This is needed because `class << self; end).class_eval(<<-WORD, ...)` has
+    // `<<` appearing as both a binary operator AND a heredoc opener.
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'<' && bytes[i + 1] == b'<' {
+            let rest = &line[i + 2..];
+            // Strip optional `-` or `~` sigil.
+            let rest = rest.strip_prefix('-').unwrap_or(rest);
+            let rest = rest.strip_prefix('~').unwrap_or(rest);
+            // Strip optional surrounding quotes.
+            let rest = if (rest.starts_with('"') && rest.contains('"'))
+                || (rest.starts_with('\'') && rest.contains('\''))
+                || (rest.starts_with('`') && rest.contains('`'))
+            {
+                &rest[1..]
+            } else {
+                rest
+            };
+            // Collect the identifier (letters, digits, underscores).
+            let word: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !word.is_empty() {
+                return Some(word);
+            }
+        }
+        i += 1;
     }
+    None
 }
 
 impl Rule for NestedMethodDefinition {
@@ -293,6 +322,9 @@ impl Rule for NestedMethodDefinition {
         let mut stack: Vec<FrameKind> = Vec::new();
         // When `Some(word)`, we are inside a heredoc whose terminator is `word`.
         let mut heredoc_terminator_word: Option<String> = None;
+        // When > 0, we are inside a multi-line percent literal (%w[...], %i{...}, etc.)
+        // and should skip line-level keyword processing.
+        let mut percent_literal_depth: i32 = 0;
 
         for i in 0..n {
             let raw = &lines[i];
@@ -310,6 +342,64 @@ impl Rule for NestedMethodDefinition {
 
             if t.starts_with('#') {
                 continue;
+            }
+
+            // Track multi-line percent literals: %w[...], %i{...}, %W(...), etc.
+            // Lines inside these literals contain plain words, not Ruby syntax.
+            if percent_literal_depth > 0 {
+                // Count bracket/brace/paren open and close to find the end of the literal.
+                for b in t.bytes() {
+                    match b {
+                        b'[' | b'{' | b'(' => percent_literal_depth += 1,
+                        b']' | b'}' | b')' => {
+                            percent_literal_depth -= 1;
+                            if percent_literal_depth == 0 { break; }
+                        }
+                        _ => {}
+                    }
+                }
+                continue; // skip keyword processing inside the literal
+            }
+            // Detect the start of a multi-line percent literal on this line.
+            // Match %w, %W, %i, %I, %s followed by [, {, or ( where the matching
+            // closer is NOT on the same line.
+            {
+                let tb = t.as_bytes();
+                let n_tb = tb.len();
+                let mut j = 0;
+                while j + 2 < n_tb {
+                    if tb[j] == b'%' {
+                        let letter = tb[j + 1];
+                        if matches!(letter, b'w' | b'W' | b'i' | b'I' | b's') {
+                            let open = tb[j + 2];
+                            let close = match open {
+                                b'[' => b']',
+                                b'{' => b'}',
+                                b'(' => b')',
+                                _ => 0,
+                            };
+                            if close != 0 {
+                                // Count opens and closes from j+2 onward
+                                let mut depth = 0i32;
+                                let mut unclosed = false;
+                                for &b in &tb[j + 2..] {
+                                    if b == open { depth += 1; }
+                                    else if b == close {
+                                        depth -= 1;
+                                        if depth == 0 { break; }
+                                    }
+                                }
+                                if depth > 0 {
+                                    // Not closed on this line — multi-line literal starts
+                                    percent_literal_depth = depth;
+                                    unclosed = true;
+                                }
+                                if unclosed { break; }
+                            }
+                        }
+                    }
+                    j += 1;
+                }
             }
 
             // Check whether this line opens a heredoc; if so, record the
