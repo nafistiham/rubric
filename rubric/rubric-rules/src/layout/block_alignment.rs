@@ -265,7 +265,13 @@ fn strip_trailing_comment_ba(s: &str) -> &str {
                     in_regex = true;
                 }
             }
-            None if b == b'#' => return s[..i].trim_end(),
+            None if b == b'#' => {
+                // `#{` is string interpolation, not a comment — skip it.
+                let next = bytes.get(i + 1).copied().unwrap_or(0);
+                if next != b'{' {
+                    return s[..i].trim_end();
+                }
+            }
             None => {}
         }
         i += 1;
