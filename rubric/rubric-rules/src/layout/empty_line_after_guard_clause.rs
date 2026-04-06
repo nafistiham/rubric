@@ -60,11 +60,28 @@ impl Rule for EmptyLineAfterGuardClause {
                 continue;
             }
 
-            // Look at next line
-            if i + 1 >= n {
+            // Guard clauses may span multiple lines when the condition is joined
+            // by `&&` / `||` continuations, e.g.:
+            //   return unless foo? &&
+            //                  bar? &&
+            //                  baz?
+            // Advance `last` to the final continuation line before checking for
+            // the required blank line.
+            let mut last = i;
+            while last + 1 < n {
+                let t = lines[last].trim();
+                if t.ends_with("&&") || t.ends_with("||") {
+                    last += 1;
+                } else {
+                    break;
+                }
+            }
+
+            // Look at next line after the full (possibly multi-line) guard clause
+            if last + 1 >= n {
                 continue;
             }
-            let next = &lines[i + 1];
+            let next = &lines[last + 1];
             let next_trimmed = next.trim();
 
             // If next line is blank, we're fine
@@ -79,7 +96,7 @@ impl Rule for EmptyLineAfterGuardClause {
 
             // If next non-blank, non-comment line is also a guard clause or
             // terminator, no blank line is needed (consecutive guards are OK).
-            let next_meaningful = (i + 1..n)
+            let next_meaningful = (last + 1..n)
                 .map(|k| lines[k].trim())
                 .find(|t| !t.is_empty() && !t.starts_with('#'));
             if let Some(t) = next_meaningful {
