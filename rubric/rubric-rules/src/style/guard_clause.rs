@@ -39,6 +39,22 @@ impl Rule for GuardClause {
                 continue;
             }
 
+            // Only flag if this `if/end` is the last meaningful statement before the
+            // enclosing `end`. Check: the next non-blank, non-comment line after the
+            // `end` must be another `end` (the enclosing method/block close).
+            // If there's more code after this if/end, it's NOT a guard clause candidate.
+            let next_code_line = (i + 3..n)
+                .map(|j| lines[j].trim())
+                .find(|l| !l.is_empty() && !l.starts_with('#'));
+            let next_is_end = next_code_line
+                .map(|l| l == "end" || l.starts_with("end ") || l.starts_with("end\t")
+                    || l.starts_with("end #") || l == "end;"
+                    || l.starts_with("rescue") || l.starts_with("ensure"))
+                .unwrap_or(true); // EOF also counts as end-of-method
+            if !next_is_end {
+                continue;
+            }
+
             let line_start = ctx.line_start_offsets[i] as u32;
             diags.push(Diagnostic {
                 rule: self.name(),
