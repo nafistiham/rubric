@@ -16,6 +16,13 @@ impl Rule for TrailingUnderscoreVariable {
                 continue;
             }
 
+            // Skip method/proc/lambda definitions — parameter defaults like
+            // `def foo(a, _ = :val)` have `, _` followed by ` = ` but are NOT
+            // parallel assignments.
+            if trimmed.starts_with("def ") || trimmed.starts_with("lambda ") {
+                continue;
+            }
+
             // Detect parallel assignment with trailing `_`: `a, _ =` or `x, y, _ =`
             // The pattern is: comma-separated identifiers ending with `, _` followed by ` =`
             if let Some(eq_pos) = trimmed.find(" = ") {

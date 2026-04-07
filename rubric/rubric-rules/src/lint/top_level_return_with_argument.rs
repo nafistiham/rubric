@@ -73,8 +73,13 @@ impl Rule for TopLevelReturnWithArgument {
                 }
             }
 
-            // At top level (no def, no other block), detect `return <value>`
-            if def_depth == 0 && block_depth == 0 && t.starts_with("return ") && t != "return" {
+            // At top level (no def, no other block), detect `return <value>`.
+            // Trailing `if`/`unless` modifiers are not arguments — skip them.
+            let has_return_arg = t.starts_with("return ")
+                && t != "return"
+                && !t.starts_with("return if ")
+                && !t.starts_with("return unless ");
+            if def_depth == 0 && block_depth == 0 && has_return_arg {
                 let indent = lines[i].len() - trimmed.len();
                 let line_start = ctx.line_start_offsets[i] as usize;
                 let pos = (line_start + indent) as u32;
