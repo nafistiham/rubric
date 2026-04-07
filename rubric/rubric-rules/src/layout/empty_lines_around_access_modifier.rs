@@ -31,7 +31,42 @@ impl Rule for EmptyLinesAroundAccessModifier {
         let lines = &ctx.lines;
         let n = lines.len();
 
+        // Track multiline %w(...) / %i(...) / %W(...) / %I(...) literals so that
+        // words like `public` or `private` inside them are not treated as access modifiers.
+        let mut in_percent_word_literal = false;
+        let mut percent_word_close: u8 = 0;
+
         for i in 0..n {
+            let line_bytes = lines[i].as_bytes();
+
+            // Detect opening of a multiline %w/W/i/I literal on this line
+            if !in_percent_word_literal {
+                let mut j = 0;
+                while j + 2 < line_bytes.len() {
+                    if line_bytes[j] == b'%'
+                        && matches!(line_bytes[j + 1], b'w' | b'W' | b'i' | b'I')
+                        && matches!(line_bytes[j + 2], b'(' | b'[' | b'{' | b'<')
+                    {
+                        let open = line_bytes[j + 2];
+                        let close = match open { b'(' => b')', b'[' => b']', b'{' => b'}', _ => b'>' };
+                        // Check if the literal is closed on this same line
+                        let rest = &lines[i][j + 3..];
+                        if !rest.contains(close as char) {
+                            in_percent_word_literal = true;
+                            percent_word_close = close;
+                        }
+                        break;
+                    }
+                    j += 1;
+                }
+            } else {
+                // Inside a multiline literal — look for the closing delimiter
+                if line_bytes.contains(&percent_word_close) {
+                    in_percent_word_literal = false;
+                }
+                continue; // skip access modifier checks for this line
+            }
+
             if !is_access_modifier(&lines[i]) {
                 continue;
             }
