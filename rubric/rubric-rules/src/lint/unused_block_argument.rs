@@ -99,15 +99,20 @@ impl Rule for UnusedBlockArgument {
             return vec![];
         }
 
-        // Body source range
-        let body_loc = body.location();
-        let body_start = body_loc.start_offset();
-        let body_end = body_loc.end_offset();
+        // Body source range.
+        // Use the body node's START but the block node's END as the range end.
+        // Heredoc content is placed inline in the source buffer after the opening
+        // sigil line, so `body.location().end_offset()` may fall short of the
+        // heredoc body lines.  The block's closing location (the `end` keyword)
+        // is always after all heredoc content, so searching up to there avoids
+        // false-positive "unused" diagnoses for args used only inside heredocs.
+        let body_start = body.location().start_offset();
+        let block_end = block_node.location().end_offset();
         let src = ctx.source.as_bytes();
-        if body_end > src.len() {
+        if block_end > src.len() {
             return vec![];
         }
-        let body_src = &src[body_start..body_end];
+        let body_src = &src[body_start..block_end];
 
         let mut diags = Vec::new();
         for (name_bytes, name_start, name_end) in &param_list {
