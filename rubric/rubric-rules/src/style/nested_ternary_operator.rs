@@ -27,23 +27,31 @@ fn has_ternary_colon(bytes: &[u8], from: usize) -> bool {
 
 /// Check whether the line has a nested ternary operator.
 ///
-/// A nested ternary requires *two or more* ternary `?` operators at the SAME
-/// expression level on the same line.  Two ternaries that each live in their own
-/// `#{...}` interpolation segment are NOT nested — each segment is its own
-/// expression context.
+/// "Nested" means one ternary lives inside the true- or false-branch of another,
+/// e.g. `a ? b ? c : d : e` or `a ? b : c ? d : e`.
+///
+/// Multiple ternaries at the *same* level (parallel), e.g.
+/// `params.key?(:x) ? foo : nil, params.key?(:y) ? bar : nil`, are NOT nested.
+///
+/// We use a stack to track open ternaries and brackets ({}/()[]):
+/// - Ternary `?` → push Ternary onto stack; if stack now has 2 Ternary entries → nested
+/// - Ternary `:` (only when top of stack is a Ternary) → pop stack
+/// - `{`/`(`/`[` → push Bracket; shields inner `:` from being treated as ternary
+/// - `}`/`)`/`]` → pop until a Bracket is removed (unclosed ternaries inside close too)
 ///
 /// We also skip:
 /// - characters inside single-quoted strings
 /// - characters inside `/regex/` literals
 /// - characters inside `%r{...}` / `%r(...)` etc. percent-regex literals
+/// - `#{...}` interpolation segments (each is its own independent context)
 /// - the comment tail starting with `#` (but not `#{`)
 fn line_has_nested_ternary(line: &str) -> bool {
     let bytes = line.as_bytes();
     let len = bytes.len();
     let mut i = 0;
 
-    // Count of ternary `?` at the current top-level expression context.
-    let mut top_level_count = 0usize;
+    // Stack entries: true = Ternary open, false = Bracket open ({, (, [)
+    let mut stack: Vec<bool> = Vec::new();
 
     while i < len {
         match bytes[i] {
@@ -56,8 +64,11 @@ fn line_has_nested_ternary(line: &str) -> bool {
                 if next != b'{' {
                     break; // rest of line is a comment
                 }
-                // `#{` — advance past `#`, let the loop encounter `{`
-                i += 1;
+                // `#{` — enter interpolation as an independent ternary context
+                i += 2; // skip `#{`
+                if check_interpolation_nested_ternary(bytes, &mut i) {
+                    return true;
+                }
                 continue;
             }
 
@@ -73,7 +84,7 @@ fn line_has_nested_ternary(line: &str) -> bool {
             }
 
             // Double-quoted string: scan with interpolation tracking.
-            // Each `#{...}` segment counts ternaries independently.
+            // Each `#{...}` segment is its own independent ternary context.
             b'"' => {
                 i += 1;
                 while i < len {
@@ -81,38 +92,10 @@ fn line_has_nested_ternary(line: &str) -> bool {
                         b'\\' => { i += 2; continue; }
                         b'"' => { i += 1; break; } // end of string
                         b'#' if i + 1 < len && bytes[i + 1] == b'{' => {
-                            // Enter interpolation — count ternaries for this segment
                             i += 2; // skip `#{`
-                            let mut interp_depth = 1usize;
-                            let mut interp_ternary_count = 0usize;
-                            while i < len && interp_depth > 0 {
-                                match bytes[i] {
-                                    b'\\' => { i += 2; continue; }
-                                    b'{' => { interp_depth += 1; i += 1; }
-                                    b'}' => {
-                                        interp_depth -= 1;
-                                        i += 1;
-                                    }
-                                    b'?' => {
-                                        let is_ternary_pos = i > 0 && matches!(
-                                            bytes[i - 1],
-                                            b' ' | b'\t' | b')' | b']' | b'\'' | b'"'
-                                        );
-                                        if is_ternary_pos && has_ternary_colon(bytes, i + 1) {
-                                            interp_ternary_count += 1;
-                                        }
-                                        i += 1;
-                                    }
-                                    _ => { i += 1; }
-                                }
-                            }
-                            // A nested ternary inside a single interpolation counts
-                            // toward the top-level total.  Two *separate* interpolations
-                            // each with one ternary do NOT count as nested.
-                            if interp_ternary_count >= 2 {
+                            if check_interpolation_nested_ternary(bytes, &mut i) {
                                 return true;
                             }
-                            continue;
                         }
                         _ => { i += 1; }
                     }
@@ -120,7 +103,7 @@ fn line_has_nested_ternary(line: &str) -> bool {
                 continue;
             }
 
-            // Percent literals: %r{...}, %w(...), %(string), etc.
+            // Percent literals: %r{...}, %w(...), %(string), etc. — skip entirely
             b'%' if i + 1 < len => {
                 let mut k = i + 1;
                 if k < len && matches!(bytes[k], b'r' | b'q' | b'Q' | b'w' | b'W' | b'i' | b'I' | b's' | b'x') {
@@ -169,16 +152,47 @@ fn line_has_nested_ternary(line: &str) -> bool {
                 continue;
             }
 
-            // Ternary `?` at top level
+            // Opening brackets: shield inner `:` from being treated as ternary colon
+            b'{' | b'(' | b'[' => {
+                stack.push(false); // false = bracket
+                i += 1;
+            }
+
+            // Closing brackets: pop until a bracket entry is removed
+            b'}' | b')' | b']' => {
+                while let Some(top) = stack.last() {
+                    let is_bracket = !top;
+                    stack.pop();
+                    if is_bracket { break; }
+                }
+                i += 1;
+            }
+
+            // Ternary `?`
             b'?' => {
                 let is_ternary_pos = i > 0 && matches!(
                     bytes[i - 1],
                     b' ' | b'\t' | b')' | b']' | b'\'' | b'"'
                 );
                 if is_ternary_pos && has_ternary_colon(bytes, i + 1) {
-                    top_level_count += 1;
-                    if top_level_count >= 2 {
+                    stack.push(true); // true = ternary
+                    // Count only Ternary entries in the stack
+                    let ternary_depth = stack.iter().filter(|&&e| e).count();
+                    if ternary_depth >= 2 {
                         return true;
+                    }
+                }
+                i += 1;
+            }
+
+            // `:` — close the innermost open ternary if it's on top of the stack
+            b':' => {
+                let prev_is_eq = i > 0 && bytes[i - 1] == b'=';
+                let next_is_colon = i + 1 < len && bytes[i + 1] == b':';
+                let prev_is_colon = i > 0 && bytes[i - 1] == b':';
+                if !prev_is_eq && !next_is_colon && !prev_is_colon {
+                    if stack.last() == Some(&true) {
+                        stack.pop(); // close the innermost ternary
                     }
                 }
                 i += 1;
@@ -188,6 +202,68 @@ fn line_has_nested_ternary(line: &str) -> bool {
         }
     }
 
+    false
+}
+
+/// Scan through a `#{...}` interpolation starting just after the `{`.
+/// Advances `*i` to just past the closing `}`.
+/// Returns true if the interpolation itself contains a nested ternary.
+fn check_interpolation_nested_ternary(bytes: &[u8], i: &mut usize) -> bool {
+    let len = bytes.len();
+    let mut depth = 1usize;
+    // Stack for ternary nesting inside the interpolation
+    let mut stack: Vec<bool> = Vec::new();
+
+    while *i < len && depth > 0 {
+        match bytes[*i] {
+            b'\\' => { *i += 2; continue; }
+            b'{' => { depth += 1; stack.push(false); *i += 1; }
+            b'}' => {
+                depth -= 1;
+                if depth > 0 {
+                    while let Some(top) = stack.last() {
+                        let is_bracket = !top;
+                        stack.pop();
+                        if is_bracket { break; }
+                    }
+                }
+                *i += 1;
+            }
+            b'(' | b'[' => { stack.push(false); *i += 1; }
+            b')' | b']' => {
+                while let Some(top) = stack.last() {
+                    let is_bracket = !top;
+                    stack.pop();
+                    if is_bracket { break; }
+                }
+                *i += 1;
+            }
+            b'?' => {
+                let is_ternary_pos = *i > 0 && matches!(
+                    bytes[*i - 1],
+                    b' ' | b'\t' | b')' | b']' | b'\'' | b'"'
+                );
+                if is_ternary_pos && has_ternary_colon(bytes, *i + 1) {
+                    stack.push(true);
+                    let ternary_depth = stack.iter().filter(|&&e| e).count();
+                    if ternary_depth >= 2 { return true; }
+                }
+                *i += 1;
+            }
+            b':' => {
+                let prev_is_eq = *i > 0 && bytes[*i - 1] == b'=';
+                let next_is_colon = *i + 1 < len && bytes[*i + 1] == b':';
+                let prev_is_colon = *i > 0 && bytes[*i - 1] == b':';
+                if !prev_is_eq && !next_is_colon && !prev_is_colon {
+                    if stack.last() == Some(&true) {
+                        stack.pop();
+                    }
+                }
+                *i += 1;
+            }
+            _ => { *i += 1; }
+        }
+    }
     false
 }
 
