@@ -150,6 +150,10 @@ impl Rule for MultilineMethodCallIndentation {
         // State for multi-line regex literal tracking
         let mut in_multiline_regex = false;
 
+        // State for trailing-dot chain indentation tracking
+        let mut in_trailing_dot_chain = false;
+        let mut chain_base_indent: usize = 0;
+
         for (i, line) in ctx.lines.iter().enumerate() {
             let trimmed = line.trim_end();
 
@@ -234,17 +238,41 @@ impl Rule for MultilineMethodCallIndentation {
                 continue;
             }
 
-            // ── Trailing-dot check ──────────────────────────────────────────
-            if code_part.ends_with('.') {
-                let line_start = ctx.line_start_offsets[i] as usize;
-                let dot_offset = line_start + code_part.len() - 1;
-                let pos = dot_offset as u32;
-                diags.push(Diagnostic {
-                    rule: self.name(),
-                    message: "Chained method call continuation detected — ensure proper indentation.".into(),
-                    range: TextRange::new(pos, pos + 1),
-                    severity: Severity::Warning,
-                });
+            // ── Trailing-dot chain indentation check ───────────────────────
+            //
+            // RuboCop's `indented` style: when a method chain uses trailing dots
+            // (`.` at end of line), all continuation lines must be indented by
+            // exactly `indentation_width` (2) spaces MORE than the chain's opener.
+            //
+            // We track:
+            //   `chain_base_indent`: indentation of the first line in a chain
+            //   `in_trailing_dot_chain`: whether we are inside such a chain
+            //
+            // When a continuation line's indentation doesn't match
+            // `chain_base_indent + 2`, flag the continuation line.
+            let current_indent = line.len() - line.trim_start().len();
+
+            if in_trailing_dot_chain {
+                let expected = chain_base_indent + 2;
+                if current_indent != expected && !code_part.trim().is_empty() {
+                    let line_start = ctx.line_start_offsets[i] as u32;
+                    let indent_end = line_start + current_indent as u32;
+                    diags.push(Diagnostic {
+                        rule: self.name(),
+                        message: format!(
+                            "Use {} (not {}) spaces for method chain indentation.",
+                            expected, current_indent
+                        ),
+                        range: TextRange::new(line_start, indent_end.max(line_start + 1)),
+                        severity: Severity::Warning,
+                    });
+                }
+                if !code_part.ends_with('.') {
+                    in_trailing_dot_chain = false;
+                }
+            } else if code_part.ends_with('.') {
+                in_trailing_dot_chain = true;
+                chain_base_indent = current_indent;
             }
         }
 
