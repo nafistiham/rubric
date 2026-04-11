@@ -65,6 +65,43 @@ impl Rule for SpaceInsideArrayLiteralBrackets {
                     None => {}
                 }
 
+                // Skip non-array percent literals (%Q, %q, %r, %x, %s) — their [ ] are NOT array brackets
+                if b == b'%' && j + 1 < len {
+                    let (type_byte, delim_idx) = if bytes[j + 1].is_ascii_alphabetic() && j + 2 < len {
+                        (bytes[j + 1], j + 2)
+                    } else {
+                        (b'Q', j + 1) // bare % acts like %Q
+                    };
+                    let delim = if delim_idx < len { bytes[delim_idx] } else { 0 };
+                    let is_str_literal = matches!(type_byte, b'Q' | b'q' | b'r' | b'x' | b's');
+                    // Also skip %w/%i with non-[ delimiters ([ delimiter handled below)
+                    let is_array_nonbracket = matches!(type_byte, b'w' | b'W' | b'i' | b'I') && delim != b'[';
+                    if (is_str_literal || is_array_nonbracket) && delim != 0 {
+                        let close_delim = match delim {
+                            b'(' => b')',
+                            b'{' => b'}',
+                            b'[' => b']',
+                            b'<' => b'>',
+                            other => other,
+                        };
+                        let paired = matches!(delim, b'(' | b'{' | b'[' | b'<');
+                        j = delim_idx + 1;
+                        let mut depth = 1usize;
+                        while j < len {
+                            let c = bytes[j];
+                            if c == b'\\' { j += 2; continue; }
+                            if paired {
+                                if c == delim { depth += 1; }
+                                else if c == close_delim { depth -= 1; if depth == 0 { j += 1; break; } }
+                            } else if c == close_delim {
+                                j += 1; break;
+                            }
+                            j += 1;
+                        }
+                        continue;
+                    }
+                }
+
                 // Skip %w[...], %W[...], %i[...], %I[...] — [ is the delimiter, not an array bracket
                 if b == b'%' && j + 2 < len && matches!(bytes[j + 1], b'w' | b'W' | b'i' | b'I') && bytes[j + 2] == b'[' {
                     j += 3; // skip %, letter, [

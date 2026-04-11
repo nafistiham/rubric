@@ -39,6 +39,11 @@ impl Rule for SpaceInsideHashLiteralBraces {
         // Cross-line block tracking: when a block `{ ... }` spans multiple lines,
         // track its brace depth so the closing `}` is not mistakenly flagged as hash.
         let mut in_multiline_block_depth: i32 = 0;
+        // Cross-line string tracking: when a string literal spans multiple lines,
+        // track whether we're inside the string body or inside a #{...} interpolation.
+        // interp_depth > 0 means we're inside a #{...} interpolation (Ruby code territory).
+        let mut in_multiline_string_delim: Option<u8> = None;
+        let mut interp_depth: i32 = 0;
 
         for (i, line) in ctx.lines.iter().enumerate() {
             let bytes = line.as_bytes();
@@ -104,6 +109,137 @@ impl Rule for SpaceInsideHashLiteralBraces {
                 continue;
             }
 
+            // If we're continuing inside a #{} interpolation spanning to this line,
+            // scan through it tracking brace depth (don't flag — the closing `}` is interpolation, not hash).
+            if in_multiline_string_delim.is_some() && interp_depth > 0 {
+                let mut j = 0;
+                while j < len && interp_depth > 0 {
+                    let b = bytes[j];
+                    match b {
+                        b'\\' => { j += 2; }
+                        b'"' | b'\'' => {
+                            let q = b; j += 1;
+                            while j < len {
+                                if bytes[j] == b'\\' { j += 2; continue; }
+                                if bytes[j] == q { j += 1; break; }
+                                j += 1;
+                            }
+                        }
+                        b'{' => { interp_depth += 1; j += 1; }
+                        b'}' => { interp_depth -= 1; j += 1; }
+                        _ => { j += 1; }
+                    }
+                }
+                // interp_depth == 0: back in string body — scan for end of string or next #{}
+                while j < len {
+                    let b = bytes[j];
+                    if b == b'\\' { j += 2; continue; }
+                    if b == b'#' && j + 1 < len && bytes[j + 1] == b'{' {
+                        interp_depth = 1; j += 2; break;
+                    }
+                    if let Some(d) = in_multiline_string_delim {
+                        if b == d { in_multiline_string_delim = None; j += 1; break; }
+                    }
+                    j += 1;
+                }
+                continue;
+            }
+
+            // If we're continuing inside a multiline string body,
+            // process this line in that context.
+            if in_multiline_string_delim.is_some() && interp_depth == 0 {
+                // We're inside the string body (not in a #{} interpolation).
+                // Scan for: end of string, start of #{} interpolation, or end of line.
+                let delim = in_multiline_string_delim.unwrap();
+                let mut j = 0;
+                while j < len {
+                    let b = bytes[j];
+                    if b == b'\\' { j += 2; continue; }
+                    if b == b'#' && j + 1 < len && bytes[j + 1] == b'{' {
+                        // Enter interpolation
+                        j += 2;
+                        interp_depth = 1;
+                        break; // fall through to main scanning below
+                    }
+                    if b == delim {
+                        // String ends
+                        in_multiline_string_delim = None;
+                        j += 1;
+                        break; // fall through to main scanning below
+                    }
+                    j += 1;
+                }
+                if in_multiline_string_delim.is_some() && interp_depth == 0 {
+                    continue; // still in string body, nothing to scan on this line
+                }
+                // Otherwise fall through with j pointing into the interpolation or after string end
+                // We need to continue scanning from j — use a separate pass below
+                let mut j2 = j;
+                while j2 < len {
+                    let b = bytes[j2];
+                    if interp_depth > 0 {
+                        // Inside #{} interpolation — track depth, flag braces
+                        match b {
+                            b'\\' => { j2 += 2; continue; }
+                            b'"' | b'\'' => {
+                                let q = b; j2 += 1;
+                                while j2 < len {
+                                    if bytes[j2] == b'\\' { j2 += 2; continue; }
+                                    if bytes[j2] == q { j2 += 1; break; }
+                                    j2 += 1;
+                                }
+                                continue;
+                            }
+                            b'#' if j2 + 1 < len && bytes[j2 + 1] == b'{' => {
+                                interp_depth += 1; j2 += 2; continue;
+                            }
+                            b'{' => { interp_depth += 1; j2 += 1; continue; }
+                            b'}' => {
+                                interp_depth -= 1;
+                                if interp_depth == 0 {
+                                    // Returned to string body
+                                    j2 += 1;
+                                    // Continue scanning string body
+                                    while j2 < len {
+                                        let c = bytes[j2];
+                                        if c == b'\\' { j2 += 2; continue; }
+                                        if c == b'#' && j2 + 1 < len && bytes[j2 + 1] == b'{' {
+                                            interp_depth = 1; j2 += 2; break;
+                                        }
+                                        if let Some(d) = in_multiline_string_delim {
+                                            if c == d { in_multiline_string_delim = None; j2 += 1; break; }
+                                        }
+                                        j2 += 1;
+                                    }
+                                    continue;
+                                }
+                                j2 += 1; continue;
+                            }
+                            _ => { j2 += 1; continue; }
+                        }
+                    } else {
+                        // Back in string body or after string end — just scan for end or next interp
+                        if let Some(d) = in_multiline_string_delim {
+                            let c = b;
+                            if c == b'\\' { j2 += 2; continue; }
+                            if c == b'#' && j2 + 1 < len && bytes[j2 + 1] == b'{' {
+                                interp_depth = 1; j2 += 2; continue;
+                            }
+                            if c == d { in_multiline_string_delim = None; j2 += 1; continue; }
+                            j2 += 1; continue;
+                        }
+                        // No longer in a multiline string — treat rest normally
+                        break;
+                    }
+                }
+                if in_multiline_string_delim.is_some() || interp_depth > 0 {
+                    continue; // still in string/interp context, nothing more to flag on this line
+                }
+                // Fell out of string — continue scanning the rest of the line from j2
+                // (drop through to main loop won't work easily, so just skip to next line)
+                continue;
+            }
+
             let mut in_string: Option<u8> = None;
 
             let mut j = 0;
@@ -136,8 +272,69 @@ impl Rule for SpaceInsideHashLiteralBraces {
                 match in_string {
                     Some(_) if b == b'\\' => { j += 2; continue; }
                     Some(delim) if b == delim => { in_string = None; j += 1; continue; }
+                    // Track #{} depth inside double-quoted strings for cross-line awareness
+                    Some(b'"') if b == b'#' && j + 1 < len && bytes[j + 1] == b'{' => {
+                        // Enter interpolation — skip until matching }
+                        j += 2;
+                        let mut depth = 1i32;
+                        while j < len && depth > 0 {
+                            match bytes[j] {
+                                b'\\' => { j += 2; }
+                                b'{' => { depth += 1; j += 1; }
+                                b'}' => { depth -= 1; j += 1; }
+                                _ => { j += 1; }
+                            }
+                        }
+                        if depth > 0 {
+                            // Interpolation spans to next line
+                            in_multiline_string_delim = in_string;
+                            interp_depth = depth;
+                            in_string = None;
+                        }
+                        continue;
+                    }
                     Some(_) => { j += 1; continue; }
-                    None if b == b'"' || b == b'\'' => { in_string = Some(b); j += 1; continue; }
+                    None if b == b'"' => {
+                        // Start double-quoted string; scan inline
+                        j += 1;
+                        let start_q = j;
+                        let _ = start_q;
+                        let mut closed = false;
+                        while j < len {
+                            let c = bytes[j];
+                            if c == b'\\' { j += 2; continue; }
+                            if c == b'"' { closed = true; j += 1; break; }
+                            if c == b'#' && j + 1 < len && bytes[j + 1] == b'{' {
+                                // Enter interpolation
+                                j += 2;
+                                let mut depth = 1i32;
+                                while j < len && depth > 0 {
+                                    match bytes[j] {
+                                        b'\\' => { j += 2; }
+                                        b'{' => { depth += 1; j += 1; }
+                                        b'}' => { depth -= 1; j += 1; }
+                                        _ => { j += 1; }
+                                    }
+                                }
+                                if depth > 0 {
+                                    // Interpolation spans to next line
+                                    in_multiline_string_delim = Some(b'"');
+                                    interp_depth = depth;
+                                    closed = true; // treat as handled
+                                    break;
+                                }
+                                continue;
+                            }
+                            j += 1;
+                        }
+                        if !closed {
+                            // String spans to next line
+                            in_multiline_string_delim = Some(b'"');
+                            interp_depth = 0;
+                        }
+                        continue;
+                    }
+                    None if b == b'\'' => { in_string = Some(b); j += 1; continue; }
                     None if b == b'#' => break,
                     None => {}
                 }
