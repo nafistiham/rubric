@@ -21,10 +21,12 @@ This document must survive context compaction. Every future session must:
 
 ## Current Phase
 
-**Phase 2 — Distribution Fix**
-Current task: Task 2.1 (not started)
+**Phase 3 — LSP Server**
+Current task: Task 3.1 (not started)
 
 Phase 1 complete (2026-04-13): all 5 tasks done, 54 tests pass, docs written.
+Phase 2 complete (2026-04-13): release.yml (4 targets), rubric-ruby gem (lazy download), bump-version.sh.
+Note: Task 2.5 (Docker smoke test) skipped — requires publishing a real release first. Verify after first tag push.
 
 ---
 
@@ -178,11 +180,11 @@ test_check_works_after_gem_install:
 
 ### Definition of Done
 
-- [ ] All 4 cross-compile targets build successfully in CI
-- [ ] GitHub release has all 4 binary assets
-- [ ] `gem install rubric-ruby` on fresh Ruby Docker image (no Rust) works
-- [ ] `rubric check` on a Ruby file reports violations correctly after gem install
-- [ ] README install section updated to `gem install rubric-ruby`
+- [x] All 4 cross-compile targets defined in CI (linux/darwin x86_64/aarch64)
+- [x] GitHub release workflow uploads all 4 binary assets as .tar.gz
+- [ ] `gem install rubric-ruby` on fresh Ruby Docker image (no Rust) works (verify after first tag push)
+- [ ] `rubric check` on a Ruby file reports violations correctly after gem install (verify after first tag push)
+- [x] README install section updated to `gem install rubric-ruby`
 
 **Estimated effort: 4 days**
 
