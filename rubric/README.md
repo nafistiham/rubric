@@ -75,9 +75,17 @@ rubric check app/models/user.rb  # single file
 rubric check --fix               # apply safe auto-fixes in place
 rubric fmt                       # format only (Layout + Style rules)
 
+# Adopt incrementally (generate a todo baseline)
+rubric todo                      # write .rubric_todo.toml — suppress pre-existing violations
+rubric check                     # now passes; new violations still surface
+rubric check --regenerate-todo   # shrink the baseline as you fix things
+rubric check --ignore-todo       # see the full picture including suppressed violations
+
 # Migrate from Rubocop
 rubric migrate                   # .rubocop.yml → rubric.toml
 ```
+
+For a full adoption walkthrough, see [docs/todo-baseline.md](docs/todo-baseline.md).
 
 ---
 
