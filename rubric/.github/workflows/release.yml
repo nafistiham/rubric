@@ -3,60 +3,63 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
 
 jobs:
   build:
-    name: Build ${{ matrix.platform }}
+    name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - platform: x86_64-linux
+          - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            rust_target: x86_64-unknown-linux-gnu
-          - platform: aarch64-linux
+            use_cross: false
+          - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            rust_target: aarch64-unknown-linux-gnu
-            cross: true
-          - platform: x86_64-darwin
+            use_cross: true
+          - target: x86_64-apple-darwin
             os: macos-13
-            rust_target: x86_64-apple-darwin
-          - platform: arm64-darwin
-            os: macos-latest
-            rust_target: aarch64-apple-darwin
+            use_cross: false
+          - target: aarch64-apple-darwin
+            os: macos-14
+            use_cross: false
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.rust_target }}
+          targets: ${{ matrix.target }}
 
-      - name: Install cross (Linux cross-compile)
-        if: matrix.cross
-        run: cargo install cross
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build binary
         run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.rust_target }}
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} -p rubric-cli
           else
-            cargo build --release --target ${{ matrix.rust_target }}
+            cargo build --release --target ${{ matrix.target }} -p rubric-cli
           fi
-        working-directory: rubric
 
-      - name: Package binary
+      - name: Package
+        shell: bash
         run: |
-          mkdir -p dist
-          cp rubric/target/${{ matrix.rust_target }}/release/rubric dist/rubric-${{ matrix.platform }}
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCHIVE="rubric-${VERSION}-${{ matrix.target }}.tar.gz"
+          cp "target/${{ matrix.target }}/release/rubric-cli" rubric
+          tar -czf "${ARCHIVE}" rubric LICENSE
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rubric-${{ matrix.platform }}
-          path: dist/
+          name: rubric-${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
 
   release:
     name: Create GitHub Release
@@ -64,6 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -71,25 +75,28 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts/
+          merge-multiple: true
 
-      - name: Create Release
+      - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: artifacts/*.tar.gz
           generate_release_notes: true
+          fail_on_unmatched_files: true
 
   publish-gem:
-    name: Publish to RubyGems
+    name: Publish gem to RubyGems
     needs: release
     runs-on: ubuntu-latest
     environment: rubygems
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3"
+          ruby-version: '3.3'
 
       - name: Configure RubyGems credentials
         run: |
@@ -97,8 +104,8 @@ jobs:
           echo ":rubygems_api_key: ${{ secrets.RUBYGEMS_API_KEY }}" > ~/.gem/credentials
           chmod 0600 ~/.gem/credentials
 
-      - name: Build and push gem
-        working-directory: rubric/gem
+      - name: Build and publish gem
+        working-directory: gem
         run: |
-          gem build rubric.gemspec
-          gem push rubric-*.gem
+          gem build rubric-ruby.gemspec
+          gem push rubric-ruby-*.gem

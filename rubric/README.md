@@ -41,11 +41,20 @@ RuboCop's `--server` mode (persistent daemon) reduces its cold-start overhead bu
 
 ## Installation
 
-### Bundler (recommended)
+### Standalone (recommended)
+
+```sh
+gem install rubric-ruby
+rubric check .
+```
+
+No Rust toolchain required. The gem downloads the precompiled binary for your platform on first run and caches it at `~/.rubric/bin/`.
+
+### Bundler
 
 ```ruby
 # Gemfile
-gem 'rubric', require: false
+gem 'rubric-ruby', require: false
 ```
 
 ```sh
@@ -53,13 +62,14 @@ bundle install
 bundle exec rubric check
 ```
 
-### Standalone
+### Supported platforms
 
-```sh
-gem install rubric
-```
-
-No Rust toolchain required. The gem ships a precompiled binary for your platform.
+| Platform | Target |
+|----------|--------|
+| macOS arm64 (M1/M2/M3) | `aarch64-apple-darwin` |
+| macOS x86_64 | `x86_64-apple-darwin` |
+| Linux x86_64 | `x86_64-unknown-linux-gnu` |
+| Linux aarch64 | `aarch64-unknown-linux-gnu` |
 
 ---
 
