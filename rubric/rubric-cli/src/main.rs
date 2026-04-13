@@ -1,4 +1,4 @@
-mod runner;
+pub mod runner;
 mod config;
 mod commands;
 
@@ -124,6 +124,12 @@ enum Commands {
         /// Output path (default: rubric.toml)
         #[arg(long, default_value = "rubric.toml")]
         output: std::path::PathBuf,
+    },
+    /// Generate .rubric_todo.toml to suppress pre-existing violations
+    Todo {
+        /// Path to lint (file or directory)
+        #[arg(default_value = ".")]
+        path: std::path::PathBuf,
     },
 }
 
@@ -487,7 +493,7 @@ fn build_rules() -> Vec<Box<dyn Rule + Send + Sync>> {
 
 /// Returns true if `file_path` matches any exclude pattern relative to `root`.
 /// Supports simple glob patterns with `*` (not `**`).
-fn is_excluded(file_path: &std::path::Path, root: &std::path::Path, patterns: &[String]) -> bool {
+pub fn is_excluded(file_path: &std::path::Path, root: &std::path::Path, patterns: &[String]) -> bool {
     let rel = file_path.strip_prefix(root).unwrap_or(file_path);
     let rel_str = rel.to_string_lossy();
     patterns.iter().any(|pat| glob_match_exclude(&rel_str, pat))
@@ -641,6 +647,17 @@ fn main() -> Result<()> {
 
         Commands::Migrate { input, output } => {
             commands::migrate::run(&input, &output)?;
+        }
+
+        Commands::Todo { path } => {
+            let config_dir = if path.is_dir() {
+                path.clone()
+            } else {
+                path.parent().unwrap_or(&path).to_path_buf()
+            };
+            let config = Config::find_and_load(&config_dir)?;
+            let rules = build_rules_with_config(&config);
+            commands::todo::run(&path, &config, &rules)?;
         }
 
         Commands::Fmt { path } => {
