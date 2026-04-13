@@ -1,6 +1,7 @@
 pub mod runner;
 mod config;
 mod commands;
+mod todo_config;
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
@@ -109,6 +110,14 @@ enum Commands {
         /// Apply safe auto-fixes
         #[arg(long)]
         fix: bool,
+
+        /// Show all violations, ignoring .rubric_todo.toml suppressions
+        #[arg(long)]
+        ignore_todo: bool,
+
+        /// Rewrite .rubric_todo.toml with the current violation set
+        #[arg(long)]
+        regenerate_todo: bool,
     },
     /// Format Ruby files (apply all safe Layout and Style fixes)
     Fmt {
@@ -571,7 +580,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Check { path, fix } => {
+        Commands::Check { path, fix, ignore_todo, regenerate_todo } => {
             let config_dir = if path.is_dir() {
                 path.clone()
             } else {
@@ -612,16 +621,36 @@ fn main() -> Result<()> {
             // Sort by path for deterministic output
             results.sort_by(|a, b| a.0.cmp(&b.0));
 
+            // --regenerate-todo: rewrite .rubric_todo.toml with the current violation set
+            if regenerate_todo {
+                commands::todo::run(&path, &config, &rules)?;
+                return Ok(());
+            }
+
             if fix {
                 let total_fixed = apply_safe_fixes(&results, &rules)?;
                 if total_fixed == 0 {
                     println!("No violations to fix.");
                 }
             } else {
+                // Load todo suppressions unless --ignore-todo was given
+                let todo = if ignore_todo {
+                    todo_config::TodoConfig::default()
+                } else {
+                    todo_config::TodoConfig::load(&config_dir)?
+                };
+
                 let mut total_violations = 0;
+                let mut total_suppressed = 0;
                 for (file, source, diagnostics) in &results {
+                    let rel = file.strip_prefix(&config_dir).unwrap_or(file);
+                    let rel_str = rel.to_string_lossy();
                     let ctx = rubric_core::LintContext::new(file.as_path(), source);
                     for diag in diagnostics {
+                        if !ignore_todo && todo.is_suppressed(diag.rule, &rel_str) {
+                            total_suppressed += 1;
+                            continue;
+                        }
                         let (line, col) = ctx.offset_to_line_col(diag.range.start);
                         println!(
                             "{}:{}:{}: [{}] {} ({})",
@@ -632,8 +661,15 @@ fn main() -> Result<()> {
                             diag.message,
                             diag.rule
                         );
+                        total_violations += 1;
                     }
-                    total_violations += diagnostics.len();
+                }
+
+                if total_suppressed > 0 {
+                    eprintln!(
+                        "({} violation(s) suppressed by .rubric_todo.toml — run `rubric check --ignore-todo` to see all)",
+                        total_suppressed
+                    );
                 }
 
                 if total_violations > 0 {
