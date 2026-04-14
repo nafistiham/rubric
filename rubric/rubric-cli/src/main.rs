@@ -2,6 +2,7 @@ pub mod runner;
 mod config;
 mod commands;
 mod todo_config;
+mod lsp;
 
 use clap::{Parser, Subcommand};
 use anyhow::Result;
@@ -140,6 +141,8 @@ enum Commands {
         #[arg(default_value = ".")]
         path: std::path::PathBuf,
     },
+    /// Start the LSP server (communicates over stdio)
+    Lsp,
 }
 
 /// Apply all FixSafety::Safe fixes from `results` to disk.
@@ -167,7 +170,7 @@ fn apply_safe_fixes(
     Ok(total_fixed)
 }
 
-fn build_rules_with_config(config: &Config) -> Vec<Box<dyn Rule + Send + Sync>> {
+pub(crate) fn build_rules_with_config(config: &Config) -> Vec<Box<dyn Rule + Send + Sync>> {
     let mut rules: Vec<Box<dyn Rule + Send + Sync>> = build_rules()
         .into_iter()
         .filter(|r| {
@@ -694,6 +697,10 @@ fn main() -> Result<()> {
             let config = Config::find_and_load(&config_dir)?;
             let rules = build_rules_with_config(&config);
             commands::todo::run(&path, &config, &rules)?;
+        }
+
+        Commands::Lsp => {
+            lsp::run()?;
         }
 
         Commands::Fmt { path } => {
