@@ -21,11 +21,12 @@ This document must survive context compaction. Every future session must:
 
 ## Current Phase
 
-**Phase 3 — LSP Server**
-Current task: Task 3.1 (not started)
+**Phase 4 — Real Users**
+Current task: Task 4.1 (not started)
 
 Phase 1 complete (2026-04-13): all 5 tasks done, 54 tests pass, docs written.
 Phase 2 complete (2026-04-13): release.yml (4 targets), rubric-ruby gem (lazy download), bump-version.sh.
+Phase 3 complete (2026-04-15): rubric lsp subcommand (tower-lsp, stdio), 5 integration tests, docs/editor-setup.md. Skipped VS Code extension — replaced with editor-setup.md covering VS Code, Neovim, Helix, Emacs, Zed.
 Note: Task 2.5 (Docker smoke test) skipped — requires publishing a real release first. Verify after first tag push.
 
 ---
